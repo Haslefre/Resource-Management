@@ -551,8 +551,10 @@
   }
 
   function projectBudgetHtml(p){
-    if(p.contractedHours === null || p.contractedHours === undefined) return '';
     const planned = projectPlannedHours(p.id);
+    if(p.contractedHours === null || p.contractedHours === undefined){
+      return `<div style="margin-top:3px;font-size:10.5px;color:var(--ink-soft);">${planned}h planned on tracker</div>`;
+    }
     const pct = p.contractedHours > 0 ? Math.round((planned/p.contractedHours)*100) : 0;
     const status = utilStatus(pct);
     return `<div style="margin-top:3px;">
@@ -759,7 +761,37 @@
             ${projectBudgetHtml(p)}
           </span>
         </span>
+        <button class="rb-icon-btn" data-notes="${p.id}" style="${p.notes ? 'color:var(--jmt-green-dark);font-weight:700;':''}">${p.notes ? 'Notes \u25cf' : 'Notes'}</button>
       </div>`).join('') + '</div>';
+    el.querySelectorAll('[data-notes]').forEach(btn=>{
+      btn.addEventListener('click', ()=> openProjectNotesModal(btn.dataset.notes));
+    });
+  }
+
+  function openProjectNotesModal(projectId){
+    const project = projectById(projectId);
+    if(!project) return;
+    const host = document.getElementById('rb-modal-host');
+    host.innerHTML = `
+      <div class="rb-overlay" id="rb-overlay">
+        <div class="rb-modal">
+          <h3>Notes</h3>
+          <div class="rb-modal-sub">${escapeHtml(project.name)}</div>
+          <div class="rb-field">
+            <textarea id="rb-notes-text" rows="7" style="width:100%;font-family:inherit;font-size:13px;padding:8px 9px;border:1px solid var(--line);border-radius:6px;resize:vertical;color:var(--ink);">${escapeHtml(project.notes || '')}</textarea>
+          </div>
+          <div class="rb-modal-actions">
+            <button class="rb-btn ghost" id="rb-notes-cancel">Cancel</button>
+            <button class="rb-btn primary" id="rb-notes-save">Save</button>
+          </div>
+        </div>
+      </div>`;
+    document.getElementById('rb-notes-cancel').addEventListener('click', closeModal);
+    document.getElementById('rb-overlay').addEventListener('click', (e)=>{ if(e.target.id==='rb-overlay') closeModal(); });
+    document.getElementById('rb-notes-save').addEventListener('click', ()=>{
+      project.notes = document.getElementById('rb-notes-text').value;
+      scheduleSave(); closeModal(); renderOverviewProjects();
+    });
   }
 
   function renderOverviewUtilization(){
@@ -1127,10 +1159,12 @@
     function rowHtml(a){
       return `<div class="rb-assign-row" data-row="${a.id || 'new-'+uid()}">
           <select data-field="project">${projectOptionsHtml(a.projectId)}</select>
-          <input data-field="hours" type="number" min="0" step="1" value="${a.hours}"/>
+          <input data-field="hours" type="number" min="0" step="1" value="${a.hours}" style="max-width:60px;"/>
           <label style="display:flex;align-items:center;gap:3px;font-size:10px;color:var(--ink-soft);white-space:nowrap;">
             <input type="checkbox" data-field="tentative" style="width:auto;" ${a.tentative?'checked':''}/> Tent.
           </label>
+          <input data-field="copy-weeks" type="number" min="1" max="26" step="1" value="4" title="Weeks to copy this line forward" style="max-width:44px;"/>
+          <button class="rb-icon-btn" data-copy-row title="Copy this line forward">&#8618;</button>
           <button class="rb-icon-btn" data-remove-row>&times;</button>
         </div>`;
     }
@@ -1141,6 +1175,28 @@
     }
     function bindRowRemove(row){
       row.querySelector('[data-remove-row]').addEventListener('click', ()=> row.remove());
+      row.querySelector('[data-copy-row]').addEventListener('click', ()=>{
+        const projectId = row.querySelector('[data-field="project"]').value;
+        const hours = Number(row.querySelector('[data-field="hours"]').value) || 0;
+        const tentative = row.querySelector('[data-field="tentative"]').checked;
+        const n = Math.max(1, Math.min(26, Number(row.querySelector('[data-field="copy-weeks"]').value) || 1));
+        if(!projectId || hours <= 0) return;
+        // persist PTO + all rows currently in the modal (like Save), so other lines' edits aren't lost
+        const pto = Number(document.getElementById('rb-assign-pto').value) || 0;
+        setPtoHours(personId, week, pto);
+        state.assignments = state.assignments.filter(a=>!(a.personId===personId && a.weekStart===week));
+        collectRowsData().forEach(r=>{
+          state.assignments.push({id:uid(), personId, projectId:r.projectId, weekStart:week, hours:r.hours, tentative:r.tentative});
+        });
+        // then copy just this one line forward, leaving other projects in those weeks untouched
+        for(let i=1;i<=n;i++){
+          const nd = new Date(week); nd.setDate(nd.getDate() + i*7);
+          const nw = isoDate(nd);
+          state.assignments = state.assignments.filter(a=>!(a.personId===personId && a.weekStart===nw && a.projectId===projectId));
+          state.assignments.push({id:uid(), personId, projectId, weekStart:nw, hours, tentative});
+        }
+        scheduleSave(); closeModal(); render();
+      });
     }
     const recentIds = recentProjectIds(4).filter(id=>projectById(id));
     const recentBtnsHtml = recentIds.length ? `
@@ -1161,11 +1217,8 @@
           <div class="rb-field"><label>Time off this week (hrs)</label><input id="rb-assign-pto" type="number" min="0" step="1" value="${currentPto || ''}" placeholder="0"/></div>
           ${recentBtnsHtml}
           <div id="rb-assign-rows">${rowsHtml()}</div>
+          <div style="font-size:10px;color:var(--ink-soft);margin-top:4px;">${'\u21B8'} on a line copies just that project's hours forward the number of weeks you set, without touching other projects in those weeks.</div>
           <button class="rb-btn ghost sm" id="rb-assign-add-row" style="margin-top:8px;">+ Add project</button>
-          <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap;">
-            <div class="rb-field" style="margin-bottom:0;max-width:110px;"><label>Weeks</label><input id="rb-copy-weeks" type="number" min="1" max="26" step="1" value="4"/></div>
-            <button class="rb-btn ghost sm" id="rb-copy-forward">Save &amp; copy forward &rarr;</button>
-          </div>
           <div class="rb-modal-actions">
             <button class="rb-btn ghost" id="rb-assign-close">Close</button>
             <button class="rb-btn primary" id="rb-assign-save">Save</button>
@@ -1202,26 +1255,6 @@
       collectRowsData().forEach(r=>{
         state.assignments.push({id:uid(), personId, projectId:r.projectId, weekStart:week, hours:r.hours, tentative:r.tentative});
       });
-      scheduleSave(); closeModal(); render();
-    });
-
-    document.getElementById('rb-copy-forward').addEventListener('click', ()=>{
-      const n = Math.max(1, Math.min(26, Number(document.getElementById('rb-copy-weeks').value) || 1));
-      const pto = Number(document.getElementById('rb-assign-pto').value) || 0;
-      setPtoHours(personId, week, pto);
-      const rowsData = collectRowsData();
-      state.assignments = state.assignments.filter(a=>!(a.personId===personId && a.weekStart===week));
-      rowsData.forEach(r=>{
-        state.assignments.push({id:uid(), personId, projectId:r.projectId, weekStart:week, hours:r.hours, tentative:r.tentative});
-      });
-      for(let i=1;i<=n;i++){
-        const nd = new Date(week); nd.setDate(nd.getDate() + i*7);
-        const nw = isoDate(nd);
-        state.assignments = state.assignments.filter(a=>!(a.personId===personId && a.weekStart===nw));
-        rowsData.forEach(r=>{
-          state.assignments.push({id:uid(), personId, projectId:r.projectId, weekStart:nw, hours:r.hours, tentative:r.tentative});
-        });
-      }
       scheduleSave(); closeModal(); render();
     });
   }
