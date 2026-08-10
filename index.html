@@ -256,6 +256,10 @@
     font-size:9.5px;font-weight:700;color:var(--under);
     background:var(--under-bg);padding:1px 5px;border-radius:4px;margin-left:6px;
   }
+  .rb-status-badge{
+    font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:6px;
+    display:inline-block;
+  }
   .rb-chip-internal{
     border:1.5px dashed rgba(255,255,255,.75);
   }
@@ -313,6 +317,7 @@
   <div class="rb-tabs">
     <button class="rb-tab-btn active" id="rb-tab-board" data-tab="board">Board</button>
     <button class="rb-tab-btn" id="rb-tab-overview" data-tab="overview">Projects &amp; Utilization</button>
+    <button class="rb-tab-btn" id="rb-tab-project" data-tab="project">Project View</button>
   </div>
 
   <div id="rb-page-board">
@@ -330,7 +335,7 @@
   <div id="rb-page-overview" style="display:none;">
     <div class="rb-section">
       <h2>Projects</h2>
-      <div class="rb-section-sub">All projects on the board. Internal projects don't count toward utilization.</div>
+      <div class="rb-section-sub">All projects on the board. Projects with "Internal" status don't count toward utilization.</div>
       <div id="rb-overview-projects"></div>
     </div>
     <div class="rb-section">
@@ -381,6 +386,28 @@
         <table class="rb-overview-table" id="rb-overview-kpi-table"></table>
       </div>
     </div>
+    <div class="rb-section">
+      <h2>Activity log</h2>
+      <div class="rb-section-sub">A running record of changes made in this browser &mdash; people, projects, assignments, notes. Saved with the rest of your data, capped to the most recent 200 entries. This only sees edits made from this browser; it isn't a shared, multi-user audit trail.</div>
+      <div style="max-height:280px;overflow:auto;" id="rb-overview-audit-wrap"></div>
+    </div>
+  </div>
+
+  <div id="rb-page-project" style="display:none;">
+    <div class="rb-section">
+      <div class="rb-field" style="max-width:340px;">
+        <label>Project</label>
+        <select id="rb-pv-select"></select>
+      </div>
+      <div id="rb-pv-detail"></div>
+    </div>
+    <div class="rb-section">
+      <h2>Who's staffed on it</h2>
+      <div class="rb-section-sub">Every week that has hours for this project, across all people ever assigned to it.</div>
+      <div style="overflow:auto;" id="rb-pv-roster-wrap">
+        <table class="rb-overview-table" id="rb-pv-roster-table"></table>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -390,7 +417,28 @@
 (function(){
   const STORAGE_KEY = 'resource-board-data';
   const WEEKS_VISIBLE = 6;
-  const PALETTE = ['#5E902E','#3B6FA5','#B8481E','#8A5CB0','#C08A1E','#2E8A82','#A44B7C','#5B6E3E'];
+  const STATUS_OPTIONS = [
+    {name:'Internal', color:'#5E902E'},
+    {name:'Future Ops', color:'#3B6FA5'},
+    {name:'Sold - Awaiting Kickoff', color:'#C08A1E'},
+    {name:'In Design', color:'#8A5CB0'},
+    {name:'In Training', color:'#2E8A82'},
+    {name:'Post Go-Live', color:'#5B6E3E'},
+    {name:'ISR/Demo/CAM calls', color:'#A44B7C'},
+    {name:'CAM Projects', color:'#B8481E'},
+  ];
+  const DEFAULT_STATUS_COLOR = '#8A8F80';
+  function statusColor(project){
+    const match = STATUS_OPTIONS.find(s=>s.name === project.status);
+    return match ? match.color : (project.color || DEFAULT_STATUS_COLOR);
+  }
+  function ownerName(project){
+    const owner = personById(project.ownerId);
+    return owner ? owner.name : null;
+  }
+  function isInternalStatus(project){
+    return project.status === 'Internal';
+  }
   const ROLE_OPTIONS = [
     {value:'PM 1', group:'pm'},
     {value:'PM 2', group:'pm'},
@@ -408,11 +456,36 @@
     return state.people.filter(p=> roleGroup(p.role) === group);
   }
 
-  let state = { people: [], projects: [], assignments: [], pto: [], settings: { annualTarget: 1450 } };
+  let state = { people: [], projects: [], assignments: [], pto: [], auditLog: [], settings: { annualTarget: 1450 } };
   let weekOffset = 0; // in units of WEEKS_VISIBLE
   let kpiYear = new Date().getFullYear();
   let saveTimer = null;
   let filterText = '';
+  let projectViewSelectedId = null;
+
+  function logActivity(text){
+    state.auditLog.unshift({id:uid(), ts:new Date().toISOString(), text});
+    if(state.auditLog.length > 200) state.auditLog.length = 200;
+    scheduleSave();
+    renderAuditLog();
+  }
+
+  function renderAuditLog(){
+    const wrap = document.getElementById('rb-overview-audit-wrap');
+    if(!wrap) return;
+    if(state.auditLog.length === 0){
+      wrap.innerHTML = '<div style="color:var(--ink-soft);font-size:12px;">No activity recorded yet.</div>';
+      return;
+    }
+    wrap.innerHTML = state.auditLog.slice(0, 60).map(entry=>{
+      const d = new Date(entry.ts);
+      const when = d.toLocaleString(undefined, {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'});
+      return `<div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:12px;">
+        <span style="color:var(--ink-soft);white-space:nowrap;min-width:120px;">${when}</span>
+        <span>${escapeHtml(entry.text)}</span>
+      </div>`;
+    }).join('');
+  }
 
   function uid(){ return Math.random().toString(36).slice(2,10); }
 
@@ -447,6 +520,12 @@
         state = JSON.parse(res.value);
         if(!state.settings) state.settings = { annualTarget: 1450 };
         if(!state.pto) state.pto = [];
+        if(!state.auditLog) state.auditLog = [];
+        state.projects.forEach(p=>{
+          if(!p.status){
+            p.status = p.internal ? 'Internal' : 'Sold - Awaiting Kickoff';
+          }
+        });
         return;
       }
     }catch(e){ /* no data yet */ }
@@ -467,9 +546,9 @@
     const rangeStart = weeksForSample[0];
     const rangeEndDate = new Date(weeksForSample[weeksForSample.length-1]); rangeEndDate.setDate(rangeEndDate.getDate()+6);
     state.projects = [
-      {id:p1, name:'Sample Client — Implementation', color:PALETTE[0], sample:true, startDate:rangeStart, endDate:isoDate(rangeEndDate), internal:false, contractedHours:400},
-      {id:p2, name:'Sample Client — Support Retainer', color:PALETTE[1], sample:true, startDate:null, endDate:null, internal:false},
-      {id:uid(), name:'Internal — Team Meetings', color:PALETTE[5], sample:true, startDate:null, endDate:null, internal:true},
+      {id:p1, name:'Sample Client — Implementation', status:'In Design', sample:true, startDate:rangeStart, endDate:isoDate(rangeEndDate), contractedHours:400, ownerId:pmId},
+      {id:p2, name:'Sample Client — Support Retainer', status:'Post Go-Live', sample:true, startDate:null, endDate:null},
+      {id:uid(), name:'Internal — Team Meetings', status:'Internal', sample:true, startDate:null, endDate:null},
     ];
     const weeks = getWeeks();
     state.assignments = [
@@ -544,7 +623,7 @@
       .filter(a=>a.personId===personId && a.weekStart===week)
       .reduce((s,a)=>{
         const proj = projectById(a.projectId);
-        if(proj && proj.internal) return s;
+        if(proj && isInternalStatus(proj)) return s;
         if(a.tentative) return s;
         return s + Number(a.hours||0);
       },0);
@@ -573,6 +652,7 @@
     renderRange();
     renderGrid();
     renderOverview();
+    renderProjectView();
   }
 
   function renderRange(){
@@ -646,9 +726,9 @@
           assigns.forEach(a=>{
             const proj = projectById(a.projectId);
             if(!proj) return;
-            const cls = (proj.internal ? 'rb-chip-internal ' : '') + (a.tentative ? 'rb-chip-tentative' : '');
-            const tag = (proj.internal ? 'IN\u00b7' : '') + (a.tentative ? 'TENT\u00b7' : '');
-            cell += `<span class="rb-chip ${cls}" style="background:${proj.color}" title="${escapeHtml(proj.name)} \u2022 ${escapeHtml(projectRangeLabel(proj))}${proj.internal ? ' \u2022 internal':''}${a.tentative ? ' \u2022 tentative':''}">${tag ? '<span class="h">'+tag+'</span>':''}${escapeHtml(proj.name)} <span class="h">${a.hours}h</span></span>`;
+            const cls = (isInternalStatus(proj) ? 'rb-chip-internal ' : '') + (a.tentative ? 'rb-chip-tentative' : '');
+            const tag = (a.tentative ? 'TENT\u00b7' : '');
+            cell += `<span class="rb-chip ${cls}" style="background:${statusColor(proj)}" title="${escapeHtml(proj.name)} \u2022 ${escapeHtml(proj.status || '')} \u2022 ${escapeHtml(projectRangeLabel(proj))}${a.tentative ? ' \u2022 tentative':''}">${tag ? '<span class="h">'+tag+'</span>':''}${escapeHtml(proj.name)} <span class="h">${a.hours}h</span></span>`;
           });
           cell += `<div class="rb-util-bar"><div class="rb-util-fill" style="width:${Math.min(pct,100)}%;background:${status.color}"></div></div>`;
           cell += `<div class="rb-util-label" style="color:${status.color}">${pct}%</div>`;
@@ -686,10 +766,12 @@
       btn.addEventListener('click', (e)=>{
         e.stopPropagation();
         const id = btn.dataset.delPerson;
+        const personName = personById(id) ? personById(id).name : 'person';
         showConfirm('Remove this person and their assignments?', ()=>{
           state.people = state.people.filter(p=>p.id!==id);
           state.assignments = state.assignments.filter(a=>a.personId!==id);
           state.pto = state.pto.filter(p=>p.personId!==id);
+          logActivity(`Removed person "${personName}"`);
           scheduleSave(); render();
         });
       });
@@ -723,7 +805,7 @@
         .filter(a=>a.personId===person.id && new Date(a.weekStart).getFullYear()===kpiYear)
         .reduce((s,a)=>{
           const proj = projectById(a.projectId);
-          if(proj && proj.internal) return s;
+          if(proj && isInternalStatus(proj)) return s;
           if(a.tentative) return s;
           return s + Number(a.hours||0);
         },0);
@@ -742,6 +824,7 @@
     renderOverviewBench();
     renderOverviewPerPerson();
     renderOverviewKpi();
+    renderAuditLog();
   }
 
   function renderOverviewProjects(){
@@ -754,10 +837,10 @@
     el.innerHTML = '<div class="rb-list-manage" style="max-height:none;">' + state.projects.map(p=>`
       <div class="row">
         <span style="display:flex;align-items:center;gap:8px;">
-          <span class="rb-swatch" style="background:${p.color}"></span>
+          <span class="rb-swatch" style="background:${statusColor(p)}"></span>
           <span>
-            <div>${escapeHtml(p.name)}${p.internal ? '<span class="rb-internal-tag">INTERNAL</span>':''}${p.sample ? '<span class="rb-sample-tag">SAMPLE</span>':''}</div>
-            <div style="font-size:10.5px;color:var(--ink-soft);margin-top:1px;">${projectRangeLabel(p)}</div>
+            <div>${escapeHtml(p.name)}<span class="rb-status-badge" style="background:${statusColor(p)}22;color:${statusColor(p)};">${escapeHtml(p.status || 'No status')}</span>${p.sample ? '<span class="rb-sample-tag">SAMPLE</span>':''}</div>
+            <div style="font-size:10.5px;color:var(--ink-soft);margin-top:1px;">${projectRangeLabel(p)}${ownerName(p) ? ' &middot; Owner: '+escapeHtml(ownerName(p)) : ''}</div>
             ${projectBudgetHtml(p)}
           </span>
         </span>
@@ -790,7 +873,8 @@
     document.getElementById('rb-overlay').addEventListener('click', (e)=>{ if(e.target.id==='rb-overlay') closeModal(); });
     document.getElementById('rb-notes-save').addEventListener('click', ()=>{
       project.notes = document.getElementById('rb-notes-text').value;
-      scheduleSave(); closeModal(); renderOverviewProjects();
+      logActivity(`Updated notes for "${project.name}"`);
+      scheduleSave(); closeModal(); renderOverviewProjects(); renderProjectViewDetail();
     });
   }
 
@@ -830,7 +914,7 @@
       state.assignments.filter(a=>a.weekStart===w && people.some(p=>p.id===a.personId)).forEach(a=>{
         const proj = projectById(a.projectId);
         if(!proj) return;
-        if(proj.internal) intl += Number(a.hours||0);
+        if(isInternalStatus(proj)) intl += Number(a.hours||0);
         else if(a.tentative) tent += Number(a.hours||0);
       });
       const pct = cap > 0 ? Math.round((ext/cap)*100) : 0;
@@ -913,12 +997,87 @@
     table.innerHTML = thead + '<tbody>' + rows + '</tbody>';
   }
 
+  function getProjectWeeks(projectId){
+    const weeksSet = new Set();
+    state.assignments.filter(a=>a.projectId===projectId).forEach(a=> weeksSet.add(a.weekStart));
+    return Array.from(weeksSet).sort();
+  }
+
+  function renderProjectView(){
+    const select = document.getElementById('rb-pv-select');
+    if(!select) return;
+    if(state.projects.length === 0){
+      select.innerHTML = '<option value="">No projects yet</option>';
+      document.getElementById('rb-pv-detail').innerHTML = '<div style="color:var(--ink-soft);font-size:12px;margin-top:10px;">Add a project first (use the "Projects" button on the Board tab).</div>';
+      document.getElementById('rb-pv-roster-wrap').innerHTML = '';
+      return;
+    }
+    if(!projectViewSelectedId || !projectById(projectViewSelectedId)){
+      projectViewSelectedId = state.projects[0].id;
+    }
+    select.innerHTML = state.projects.map(p=>`<option value="${p.id}" ${p.id===projectViewSelectedId?'selected':''}>${escapeHtml(p.name)}</option>`).join('');
+    renderProjectViewDetail();
+  }
+
+  function renderProjectViewDetail(){
+    const project = projectById(projectViewSelectedId);
+    const detailEl = document.getElementById('rb-pv-detail');
+    const rosterWrap = document.getElementById('rb-pv-roster-wrap');
+    if(!project){ detailEl.innerHTML=''; rosterWrap.innerHTML=''; return; }
+
+    detailEl.innerHTML = `
+      <div style="margin-top:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span class="rb-swatch" style="background:${statusColor(project)}"></span>
+        <span class="rb-status-badge" style="background:${statusColor(project)}22;color:${statusColor(project)};margin-left:0;">${escapeHtml(project.status || 'No status')}</span>
+        ${project.sample ? '<span class="rb-sample-tag">SAMPLE</span>':''}
+      </div>
+      <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">${projectRangeLabel(project)}${ownerName(project) ? ' &middot; Owner: '+escapeHtml(ownerName(project)) : ' &middot; No owner set'}</div>
+      <div style="margin-top:6px;">${projectBudgetHtml(project)}</div>
+      <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div style="font-size:12px;font-weight:700;">Notes</div>
+          <button class="rb-btn ghost sm" id="rb-pv-notes">${project.notes ? 'Edit' : 'Add notes'}</button>
+        </div>
+        <div style="margin-top:8px;font-size:12.5px;color:${project.notes ? 'var(--ink)':'var(--ink-soft)'};white-space:pre-wrap;background:#F4F5F0;border:1px solid var(--line);border-radius:8px;padding:10px;min-height:20px;">${project.notes ? escapeHtml(project.notes) : 'No notes yet.'}</div>
+      </div>
+    `;
+    document.getElementById('rb-pv-notes').addEventListener('click', ()=> openProjectNotesModal(project.id));
+
+    const weeks = getProjectWeeks(project.id);
+    if(weeks.length === 0){
+      rosterWrap.innerHTML = '<div style="color:var(--ink-soft);font-size:12px;">No one has hours on this project yet.</div>';
+      return;
+    }
+    const personIds = Array.from(new Set(state.assignments.filter(a=>a.projectId===project.id).map(a=>a.personId)));
+    const people = personIds.map(id=>personById(id)).filter(Boolean);
+
+    let thead = '<thead><tr><th>Person</th>' + weeks.map(w=>`<th>${fmtShort(new Date(w))}</th>`).join('') + '<th>Total</th></tr></thead>';
+    let rows = '';
+    people.forEach(person=>{
+      let total = 0;
+      let row = `<tr><th>${escapeHtml(person.name)}<div style="font-weight:400;color:var(--ink-soft);font-size:10.5px;">${escapeHtml(person.role)}</div></th>`;
+      weeks.forEach(w=>{
+        const hrs = state.assignments
+          .filter(a=>a.projectId===project.id && a.personId===person.id && a.weekStart===w)
+          .reduce((s,a)=>s+Number(a.hours||0),0);
+        total += hrs;
+        row += `<td>${hrs > 0 ? hrs+'h' : '\u2014'}</td>`;
+      });
+      row += `<td style="font-weight:800;">${total}h</td></tr>`;
+      rows += row;
+    });
+    rosterWrap.innerHTML = `<table class="rb-overview-table">${thead}<tbody>${rows}</tbody></table>`;
+  }
+
   function switchTab(tab){
     document.getElementById('rb-page-board').style.display = tab==='board' ? '' : 'none';
     document.getElementById('rb-page-overview').style.display = tab==='overview' ? '' : 'none';
+    document.getElementById('rb-page-project').style.display = tab==='project' ? '' : 'none';
     document.getElementById('rb-tab-board').classList.toggle('active', tab==='board');
     document.getElementById('rb-tab-overview').classList.toggle('active', tab==='overview');
+    document.getElementById('rb-tab-project').classList.toggle('active', tab==='project');
     if(tab==='overview') renderOverview();
+    if(tab==='project') renderProjectView();
   }
 
   // ---------- Modals ----------
@@ -990,8 +1149,10 @@
       if(!name) return;
       if(editing){
         editing.name = name; editing.role = role; editing.capacity = cap;
+        logActivity(`Edited person "${name}"`);
       } else {
         state.people.push({id:uid(), name, role, capacity:cap});
+        logActivity(`Added person "${name}" (${role})`);
       }
       scheduleSave(); closeModal(); render();
     });
@@ -1004,10 +1165,10 @@
       return state.projects.map(p=>`
         <div class="row">
           <span style="display:flex;align-items:center;gap:8px;">
-            <span class="rb-swatch" style="background:${p.color}"></span>
+            <span class="rb-swatch" style="background:${statusColor(p)}"></span>
             <span>
-              <div>${escapeHtml(p.name)}${p.internal ? '<span class="rb-internal-tag">INTERNAL</span>':''}${p.sample ? '<span class="rb-sample-tag">SAMPLE</span>':''}</div>
-              <div style="font-size:10.5px;color:var(--ink-soft);margin-top:1px;">${projectRangeLabel(p)}</div>
+              <div>${escapeHtml(p.name)}<span class="rb-status-badge" style="background:${statusColor(p)}22;color:${statusColor(p)};">${escapeHtml(p.status || 'No status')}</span>${p.sample ? '<span class="rb-sample-tag">SAMPLE</span>':''}</div>
+              <div style="font-size:10.5px;color:var(--ink-soft);margin-top:1px;">${projectRangeLabel(p)}${ownerName(p) ? ' &middot; Owner: '+escapeHtml(ownerName(p)) : ''}</div>
               ${projectBudgetHtml(p)}
             </span>
           </span>
@@ -1029,12 +1190,14 @@
             <div class="rb-field"><label>End date <span style="font-weight:400;text-transform:none;">(optional)</span></label><input id="rb-new-proj-end" type="date"/></div>
           </div>
           <div class="rb-field"><label>Contracted hours <span style="font-weight:400;text-transform:none;">(optional)</span></label><input id="rb-new-proj-contracted" type="number" min="0" step="1" placeholder="e.g. 400"/></div>
-          <div class="rb-field"><label>Color</label>
-            <select id="rb-new-proj-color">${PALETTE.map((c,i)=>`<option value="${c}" style="background:${c}">Color ${i+1}</option>`).join('')}</select>
+          <div class="rb-field"><label>Status</label>
+            <select id="rb-new-proj-status">${STATUS_OPTIONS.map(s=>`<option value="${s.name}">${s.name}</option>`).join('')}</select>
           </div>
-          <div class="rb-field" style="display:flex;align-items:center;gap:7px;">
-            <input type="checkbox" id="rb-new-proj-internal" style="width:auto;"/>
-            <label for="rb-new-proj-internal" style="margin:0;text-transform:none;font-size:12.5px;font-weight:600;color:var(--ink);">Internal (meetings, admin, etc. &mdash; excluded from utilization)</label>
+          <div class="rb-field"><label>Owner <span style="font-weight:400;text-transform:none;">(optional)</span></label>
+            <select id="rb-new-proj-owner">
+              <option value="">No owner</option>
+              ${state.people.map(p=>`<option value="${p.id}">${escapeHtml(p.name)} \u2014 ${escapeHtml(p.role)}</option>`).join('')}
+            </select>
           </div>
           <div class="rb-modal-actions" style="justify-content:space-between;">
             <button class="rb-btn ghost sm" id="rb-clear-sample">Clear sample data</button>
@@ -1050,13 +1213,14 @@
     document.getElementById('rb-clear-sample').addEventListener('click', ()=>{ clearSample(); openProjectsModal(); });
     document.getElementById('rb-proj-add').addEventListener('click', ()=>{
       const name = document.getElementById('rb-new-proj-name').value.trim();
-      const color = document.getElementById('rb-new-proj-color').value;
+      const status = document.getElementById('rb-new-proj-status').value;
       const startDate = document.getElementById('rb-new-proj-start').value || null;
       const endDate = document.getElementById('rb-new-proj-end').value || null;
       const contractedHours = document.getElementById('rb-new-proj-contracted').value ? Number(document.getElementById('rb-new-proj-contracted').value) : null;
-      const internal = document.getElementById('rb-new-proj-internal').checked;
+      const ownerId = document.getElementById('rb-new-proj-owner').value || null;
       if(!name) return;
-      state.projects.push({id:uid(), name, color, startDate, endDate, internal, contractedHours});
+      state.projects.push({id:uid(), name, status, startDate, endDate, contractedHours, ownerId});
+      logActivity(`Added project "${name}" (${status})`);
       scheduleSave(); render(); openProjectsModal();
     });
     host.querySelectorAll('[data-edit-proj]').forEach(btn=>{
@@ -1068,9 +1232,11 @@
     host.querySelectorAll('[data-del-proj]').forEach(btn=>{
       btn.addEventListener('click', ()=>{
         const id = btn.dataset.delProj;
+        const projName = projectById(id) ? projectById(id).name : 'project';
         showConfirm('Remove this project and its assignments?', ()=>{
           state.projects = state.projects.filter(p=>p.id!==id);
           state.assignments = state.assignments.filter(a=>a.projectId!==id);
+          logActivity(`Removed project "${projName}"`);
           scheduleSave(); render(); openProjectsModal();
         }, ()=> openProjectsModal());
       });
@@ -1090,12 +1256,14 @@
             <div class="rb-field"><label>End date <span style="font-weight:400;text-transform:none;">(optional)</span></label><input id="rb-edit-proj-end" type="date" value="${project.endDate || ''}"/></div>
           </div>
           <div class="rb-field"><label>Contracted hours <span style="font-weight:400;text-transform:none;">(optional)</span></label><input id="rb-edit-proj-contracted" type="number" min="0" step="1" value="${project.contractedHours !== null && project.contractedHours !== undefined ? project.contractedHours : ''}" placeholder="e.g. 400"/></div>
-          <div class="rb-field"><label>Color</label>
-            <select id="rb-edit-proj-color">${PALETTE.map((c,i)=>`<option value="${c}" ${c===project.color?'selected':''} style="background:${c}">Color ${i+1}</option>`).join('')}</select>
+          <div class="rb-field"><label>Status</label>
+            <select id="rb-edit-proj-status">${STATUS_OPTIONS.map(s=>`<option value="${s.name}" ${s.name===project.status?'selected':''}>${s.name}</option>`).join('')}</select>
           </div>
-          <div class="rb-field" style="display:flex;align-items:center;gap:7px;">
-            <input type="checkbox" id="rb-edit-proj-internal" style="width:auto;" ${project.internal ? 'checked':''}/>
-            <label for="rb-edit-proj-internal" style="margin:0;text-transform:none;font-size:12.5px;font-weight:600;color:var(--ink);">Internal (meetings, admin, etc. &mdash; excluded from utilization)</label>
+          <div class="rb-field"><label>Owner <span style="font-weight:400;text-transform:none;">(optional)</span></label>
+            <select id="rb-edit-proj-owner">
+              <option value="">No owner</option>
+              ${state.people.map(p=>`<option value="${p.id}" ${p.id===project.ownerId?'selected':''}>${escapeHtml(p.name)} \u2014 ${escapeHtml(p.role)}</option>`).join('')}
+            </select>
           </div>
           <div class="rb-modal-actions">
             <button class="rb-btn ghost" id="rb-edit-proj-cancel">Cancel</button>
@@ -1113,8 +1281,9 @@
       project.endDate = document.getElementById('rb-edit-proj-end').value || null;
       const ch = document.getElementById('rb-edit-proj-contracted').value;
       project.contractedHours = ch ? Number(ch) : null;
-      project.color = document.getElementById('rb-edit-proj-color').value;
-      project.internal = document.getElementById('rb-edit-proj-internal').checked;
+      project.status = document.getElementById('rb-edit-proj-status').value;
+      project.ownerId = document.getElementById('rb-edit-proj-owner').value || null;
+      logActivity(`Edited project "${project.name}"`);
       scheduleSave(); render(); openProjectsModal();
     });
   }
@@ -1195,6 +1364,8 @@
           state.assignments = state.assignments.filter(a=>!(a.personId===personId && a.weekStart===nw && a.projectId===projectId));
           state.assignments.push({id:uid(), personId, projectId, weekStart:nw, hours, tentative});
         }
+        const proj = projectById(projectId);
+        logActivity(`Copied "${proj ? proj.name : 'project'}" forward ${n} week${n>1?'s':''} for "${person.name}"`);
         scheduleSave(); closeModal(); render();
       });
     }
@@ -1204,7 +1375,7 @@
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
         ${recentIds.map(id=>{
           const p = projectById(id);
-          return `<button type="button" class="rb-btn ghost sm" data-quick-add="${id}" style="border-color:${p.color};color:${p.color};">${escapeHtml(p.name)}</button>`;
+          return `<button type="button" class="rb-btn ghost sm" data-quick-add="${id}" style="border-color:${statusColor(p)};color:${statusColor(p)};">${escapeHtml(p.name)}</button>`;
         }).join('')}
       </div>` : '';
     const currentPto = getPtoHours(personId, week);
@@ -1255,6 +1426,7 @@
       collectRowsData().forEach(r=>{
         state.assignments.push({id:uid(), personId, projectId:r.projectId, weekStart:week, hours:r.hours, tentative:r.tentative});
       });
+      logActivity(`Updated assignments for "${person.name}", week of ${fmtShort(new Date(week))}`);
       scheduleSave(); closeModal(); render();
     });
   }
@@ -1326,17 +1498,19 @@
           state.assignments.push({id:uid(), personId, projectId, weekStart:w, hours, tentative});
         });
       }
+      const proj = projectById(projectId);
+      logActivity(`Bulk assigned "${proj ? proj.name : 'project'}" to ${personIds.length} people, ${n} week${n>1?'s':''} from ${fmtShort(new Date(startWeek))}`);
       scheduleSave(); closeModal(); render();
     });
   }
 
   function exportCsv(){
-    const rows = [['Person','Role','Type','Project','Week','Hours','Tentative']];
+    const rows = [['Person','Role','Status','Project','Week','Hours','Tentative']];
     state.assignments.forEach(a=>{
       const person = personById(a.personId);
       const proj = projectById(a.projectId);
       if(!person || !proj) return;
-      rows.push([person.name, person.role, proj.internal ? 'Internal':'External', proj.name, a.weekStart, a.hours, a.tentative ? 'Yes':'No']);
+      rows.push([person.name, person.role, proj.status || '', proj.name, a.weekStart, a.hours, a.tentative ? 'Yes':'No']);
     });
     state.pto.forEach(p=>{
       const person = personById(p.personId);
@@ -1365,6 +1539,11 @@
   document.getElementById('rb-manage-projects').addEventListener('click', ()=> openProjectsModal());
   document.getElementById('rb-tab-board').addEventListener('click', ()=> switchTab('board'));
   document.getElementById('rb-tab-overview').addEventListener('click', ()=> switchTab('overview'));
+  document.getElementById('rb-tab-project').addEventListener('click', ()=> switchTab('project'));
+  document.getElementById('rb-pv-select').addEventListener('change', (e)=>{
+    projectViewSelectedId = e.target.value;
+    renderProjectViewDetail();
+  });
   document.getElementById('rb-bulk-assign').addEventListener('click', ()=> openBulkAssignModal());
   document.getElementById('rb-export-csv').addEventListener('click', ()=> exportCsv());
   document.getElementById('rb-filter').addEventListener('input', (e)=>{
