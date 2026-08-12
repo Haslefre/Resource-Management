@@ -14,8 +14,33 @@
     --optimal-bg:#E8F1E0;
     --over:#B8481E;
     --over-bg:#FBEAE2;
+    --cell-hover-bg:#F1F4EC;
+    --cell-empty-color:#B7BDAE;
+    --util-track-bg:#EDEFE7;
+    --pto-chip-bg:#8A8F80;
+    --soft-panel-bg:#F4F5F0;
     --radius:10px;
     font-family: "Avenir Next", "Avenir", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .rb-root.rb-dark{
+    --jmt-green-dark:#8FC65C;
+    --jmt-green-light:#243218;
+    --ink:#ECEEE6;
+    --ink-soft:#9DA492;
+    --line:#3A4032;
+    --bg:#1B1E17;
+    --panel:#242920;
+    --under:#8FA3C7;
+    --under-bg:#212B3A;
+    --optimal:#6FCB4D;
+    --optimal-bg:#1E2B17;
+    --over:#E38A63;
+    --over-bg:#3A2018;
+    --cell-hover-bg:#2B3124;
+    --cell-empty-color:#666C58;
+    --util-track-bg:#333829;
+    --pto-chip-bg:#6E7462;
+    --soft-panel-bg:#20241C;
   }
   *{box-sizing:border-box;}
   .rb-root{
@@ -25,6 +50,7 @@
     min-height:100vh;
     font-size:14px;
     line-height:1.4;
+    transition:background-color .15s, color .15s;
   }
   .rb-topbar{
     display:flex;
@@ -147,7 +173,7 @@
     padding:6px 6px 8px 6px;
     transition:background .1s;
   }
-  td.rb-cell:hover{background:#F1F4EC;}
+  td.rb-cell:hover{background:var(--cell-hover-bg);}
   .rb-chip{
     display:block;
     font-size:11px;
@@ -162,14 +188,14 @@
   }
   .rb-chip .h{font-variant-numeric:tabular-nums;font-weight:700;opacity:.9;}
   .rb-cell-empty{
-    font-size:11px;color:#B7BDAE;
+    font-size:11px;color:var(--cell-empty-color);
     padding-top:2px;
   }
   .rb-util-bar{
     margin-top:6px;
     height:5px;
     border-radius:3px;
-    background:#EDEFE7;
+    background:var(--util-track-bg);
     overflow:hidden;
   }
   .rb-util-fill{height:100%;border-radius:3px;}
@@ -206,7 +232,7 @@
   .rb-field input, .rb-field select{
     width:100%;font-family:inherit;font-size:13px;
     padding:7px 9px;border:1px solid var(--line);border-radius:6px;
-    background:#fff;color:var(--ink);
+    background:var(--panel);color:var(--ink);
   }
   .rb-field input:focus, .rb-field select:focus{outline:2px solid var(--jmt-green);outline-offset:0;border-color:var(--jmt-green);}
   .rb-row2{display:flex;gap:10px;}
@@ -218,8 +244,8 @@
     padding:8px 0;border-bottom:1px solid var(--line);
   }
   .rb-assign-row:last-of-type{border-bottom:none;}
-  .rb-assign-row select{flex:2;}
-  .rb-assign-row input{flex:1;min-width:0;}
+  .rb-assign-row select{flex:2;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 7px;font-family:inherit;font-size:13px;}
+  .rb-assign-row input{flex:1;min-width:0;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 7px;font-family:inherit;font-size:13px;}
   .rb-list-manage{max-height:220px;overflow:auto;margin-bottom:10px;}
   .rb-list-manage .row{
     display:flex;align-items:center;justify-content:space-between;
@@ -269,11 +295,11 @@
   }
   .rb-chip-pto{
     display:block;font-size:11px;font-weight:600;padding:3px 6px;border-radius:5px;
-    margin-bottom:3px;color:#fff;background:#8A8F80;white-space:nowrap;
+    margin-bottom:3px;color:#fff;background:var(--pto-chip-bg);white-space:nowrap;
   }
   tfoot.rb-totals th, tfoot.rb-totals td{
     border-top:2px solid var(--line);border-bottom:none;
-    background:#F4F5F0;font-weight:700;padding:8px 6px;font-size:11px;
+    background:var(--soft-panel-bg);font-weight:700;padding:8px 6px;font-size:11px;
   }
   .rb-filter-input{
     font-family:inherit;font-size:13px;padding:7px 10px;border:1px solid var(--line);
@@ -312,6 +338,7 @@
       <button class="rb-btn" id="rb-new-phased-project">+ Phased project</button>
       <button class="rb-btn ghost" id="rb-export-csv">Export CSV</button>
       <button class="rb-btn ghost" id="rb-manage-holidays">Holidays</button>
+      <button class="rb-btn ghost" id="rb-theme-toggle">\ud83c\udf19 Dark mode</button>
       <input class="rb-filter-input" id="rb-filter" placeholder="Filter by name or role\u2026"/>
     </div>
   </div>
@@ -417,6 +444,7 @@
 <script>
 (function(){
   const STORAGE_KEY = 'resource-board-data';
+  const THEME_STORAGE_KEY = 'resource-board-theme';
   const WEEKS_VISIBLE = 6;
 
   const STATUS_OPTIONS = [
@@ -576,6 +604,37 @@
       try{ await window.storage.set(STORAGE_KEY, JSON.stringify(state), false); }
       catch(e){ console.error('save failed', e); }
     }, 250);
+  }
+
+  function applyTheme(theme){
+    const root = document.getElementById('rb-root');
+    const btn = document.getElementById('rb-theme-toggle');
+    if(theme === 'dark'){
+      root.classList.add('rb-dark');
+      if(btn) btn.textContent = '\u2600\ufe0f Light mode';
+    } else {
+      root.classList.remove('rb-dark');
+      if(btn) btn.textContent = '\ud83c\udf19 Dark mode';
+    }
+  }
+
+  async function loadTheme(){
+    try{
+      const res = await window.storage.get(THEME_STORAGE_KEY, false);
+      if(res && res.value){
+        applyTheme(res.value);
+        return;
+      }
+    }catch(e){ /* no preference saved yet, default to light */ }
+    applyTheme('light');
+  }
+
+  async function toggleTheme(){
+    const isDark = document.getElementById('rb-root').classList.contains('rb-dark');
+    const next = isDark ? 'light' : 'dark';
+    applyTheme(next);
+    try{ await window.storage.set(THEME_STORAGE_KEY, next, false); }
+    catch(e){ console.error('theme save failed', e); }
   }
 
   function projectById(id){ return state.projects.find(p=>p.id===id); }
@@ -839,7 +898,7 @@
           <h3>Notes</h3>
           <div class="rb-modal-sub">${escapeHtml(project.name)}</div>
           <div class="rb-field">
-            <textarea id="rb-notes-text" rows="10" style="width:100%;font-family:inherit;font-size:13px;padding:8px 9px;border:1px solid var(--line);border-radius:6px;resize:both;min-height:160px;color:var(--ink);">${escapeHtml(project.notes || '')}</textarea>
+            <textarea id="rb-notes-text" rows="10" style="width:100%;font-family:inherit;font-size:13px;padding:8px 9px;border:1px solid var(--line);border-radius:6px;resize:both;min-height:160px;color:var(--ink);background:var(--panel);">${escapeHtml(project.notes || '')}</textarea>
           </div>
           <div class="rb-modal-actions">
             <button class="rb-btn ghost" id="rb-notes-cancel">Cancel</button>
@@ -1066,7 +1125,7 @@
           <div style="font-size:12px;font-weight:700;">Notes</div>
           <button class="rb-btn ghost sm" id="rb-pv-notes">${project.notes ? 'Edit' : 'Add notes'}</button>
         </div>
-        <div style="margin-top:8px;font-size:12.5px;color:${project.notes ? 'var(--ink)':'var(--ink-soft)'};white-space:pre-wrap;background:#F4F5F0;border:1px solid var(--line);border-radius:8px;padding:10px;min-height:20px;">${project.notes ? escapeHtml(project.notes) : 'No notes yet.'}</div>
+        <div style="margin-top:8px;font-size:12.5px;color:${project.notes ? 'var(--ink)':'var(--ink-soft)'};white-space:pre-wrap;background:var(--soft-panel-bg);border:1px solid var(--line);border-radius:8px;padding:10px;min-height:20px;">${project.notes ? escapeHtml(project.notes) : 'No notes yet.'}</div>
       </div>
     `;
     document.getElementById('rb-pv-notes').addEventListener('click', ()=> openProjectNotesModal(project.id));
@@ -1219,7 +1278,7 @@
           <h3>Projects</h3>
           <div class="rb-modal-sub">Projects appear as color chips on the board.</div>
           <div class="rb-list-manage" id="rb-proj-list">${listHtml()}</div>
-          <div class="rb-field"><label>New project name</label><textarea id="rb-new-proj-name" rows="1" placeholder="e.g. Acme Corp — Implementation" style="width:100%;font-family:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;resize:vertical;color:var(--ink);"></textarea></div>
+          <div class="rb-field"><label>New project name</label><textarea id="rb-new-proj-name" rows="1" placeholder="e.g. Acme Corp — Implementation" style="width:100%;font-family:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;resize:vertical;color:var(--ink);background:var(--panel);"></textarea></div>
           <div class="rb-row2">
             <div class="rb-field"><label>Start date <span style="font-weight:400;text-transform:none;">(optional)</span></label><input id="rb-new-proj-start" type="date"/></div>
             <div class="rb-field"><label>End date <span style="font-weight:400;text-transform:none;">(optional)</span></label><input id="rb-new-proj-end" type="date"/></div>
@@ -1286,7 +1345,7 @@
         <div class="rb-modal">
           <h3>Edit project</h3>
           <div class="rb-modal-sub">Changes apply everywhere this project appears on the board.</div>
-          <div class="rb-field"><label>Project name</label><textarea id="rb-edit-proj-name" rows="1" style="width:100%;font-family:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;resize:vertical;color:var(--ink);">${escapeHtml(project.name)}</textarea></div>
+          <div class="rb-field"><label>Project name</label><textarea id="rb-edit-proj-name" rows="1" style="width:100%;font-family:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;resize:vertical;color:var(--ink);background:var(--panel);">${escapeHtml(project.name)}</textarea></div>
           <div class="rb-row2">
             <div class="rb-field"><label>Start date <span style="font-weight:400;text-transform:none;">(optional)</span></label><input id="rb-edit-proj-start" type="date" value="${project.startDate || ''}"/></div>
             <div class="rb-field"><label>End date <span style="font-weight:400;text-transform:none;">(optional)</span></label><input id="rb-edit-proj-end" type="date" value="${project.endDate || ''}"/></div>
@@ -1914,7 +1973,7 @@
           <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
             <div class="rb-field">
               <label>Bulk add <span style="font-weight:400;text-transform:none;">(one per line: Name, Date, Hours &mdash; hours optional, defaults to 8)</span></label>
-              <textarea id="rb-hol-bulk" rows="6" placeholder="Labor Day, 2026-09-07, 8&#10;Christmas Eve, 2026-12-24, 4" style="width:100%;font-family:inherit;font-size:12.5px;padding:8px 9px;border:1px solid var(--line);border-radius:6px;resize:both;min-height:100px;color:var(--ink);"></textarea>
+              <textarea id="rb-hol-bulk" rows="6" placeholder="Labor Day, 2026-09-07, 8&#10;Christmas Eve, 2026-12-24, 4" style="width:100%;font-family:inherit;font-size:12.5px;padding:8px 9px;border:1px solid var(--line);border-radius:6px;resize:both;min-height:100px;color:var(--ink);background:var(--panel);"></textarea>
             </div>
             <button class="rb-btn ghost sm" id="rb-hol-bulk-add">Add bulk list</button>
           </div>
@@ -2031,6 +2090,7 @@
   document.getElementById('rb-new-phased-project').addEventListener('click', ()=> openPhasedProjectModal());
   document.getElementById('rb-export-csv').addEventListener('click', ()=> exportCsv());
   document.getElementById('rb-manage-holidays').addEventListener('click', ()=> openHolidaysModal());
+  document.getElementById('rb-theme-toggle').addEventListener('click', ()=> toggleTheme());
   document.getElementById('rb-filter').addEventListener('input', (e)=>{
     filterText = e.target.value;
     renderGrid();
@@ -2046,5 +2106,6 @@
   });
 
   load().then(render);
+  loadTheme();
 })();
 </script>
