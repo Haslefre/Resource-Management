@@ -309,15 +309,18 @@
       <button class="rb-btn" id="rb-manage-projects">Projects</button>
       <button class="rb-btn" id="rb-add-person">+ Person</button>
       <button class="rb-btn" id="rb-bulk-assign">Bulk assign</button>
+      <button class="rb-btn" id="rb-new-phased-project">+ Phased project</button>
       <button class="rb-btn ghost" id="rb-export-csv">Export CSV</button>
+      <button class="rb-btn ghost" id="rb-manage-holidays">Holidays</button>
       <input class="rb-filter-input" id="rb-filter" placeholder="Filter by name or role\u2026"/>
     </div>
   </div>
 
   <div class="rb-tabs">
     <button class="rb-tab-btn active" id="rb-tab-board" data-tab="board">Board</button>
-    <button class="rb-tab-btn" id="rb-tab-overview" data-tab="overview">Projects &amp; Utilization</button>
+    <button class="rb-tab-btn" id="rb-tab-overview" data-tab="overview">Utilization Rate</button>
     <button class="rb-tab-btn" id="rb-tab-project" data-tab="project">Project View</button>
+    <button class="rb-tab-btn" id="rb-tab-activity" data-tab="activity">Activity Log</button>
   </div>
 
   <div id="rb-page-board">
@@ -333,11 +336,6 @@
   </div>
 
   <div id="rb-page-overview" style="display:none;">
-    <div class="rb-section">
-      <h2>Projects</h2>
-      <div class="rb-section-sub">All projects on the board. Projects with "Internal" status don't count toward utilization.</div>
-      <div id="rb-overview-projects"></div>
-    </div>
     <div class="rb-section">
       <h2>Weekly utilization</h2>
       <div class="rb-section-sub">Committed hours vs. total team capacity (after PTO). Use the &larr; / &rarr; on the Board tab to change weeks.</div>
@@ -386,11 +384,6 @@
         <table class="rb-overview-table" id="rb-overview-kpi-table"></table>
       </div>
     </div>
-    <div class="rb-section">
-      <h2>Activity log</h2>
-      <div class="rb-section-sub">A running record of changes made in this browser &mdash; people, projects, assignments, notes. Saved with the rest of your data, capped to the most recent 200 entries. This only sees edits made from this browser; it isn't a shared, multi-user audit trail.</div>
-      <div style="max-height:280px;overflow:auto;" id="rb-overview-audit-wrap"></div>
-    </div>
   </div>
 
   <div id="rb-page-project" style="display:none;">
@@ -409,6 +402,14 @@
       </div>
     </div>
   </div>
+
+  <div id="rb-page-activity" style="display:none;">
+    <div class="rb-section">
+      <h2>Activity log</h2>
+      <div class="rb-section-sub">A running record of changes made in this browser &mdash; people, projects, assignments, notes. Saved with the rest of your data, capped to the most recent 200 entries. This only sees edits made from this browser; it isn't a shared, multi-user audit trail.</div>
+      <div style="max-height:520px;overflow:auto;" id="rb-overview-audit-wrap"></div>
+    </div>
+  </div>
 </div>
 
 <div id="rb-modal-host"></div>
@@ -417,6 +418,7 @@
 (function(){
   const STORAGE_KEY = 'resource-board-data';
   const WEEKS_VISIBLE = 6;
+
   const STATUS_OPTIONS = [
     {name:'Internal', color:'#5E902E'},
     {name:'Future Ops', color:'#3B6FA5'},
@@ -456,7 +458,7 @@
     return state.people.filter(p=> roleGroup(p.role) === group);
   }
 
-  let state = { people: [], projects: [], assignments: [], pto: [], auditLog: [], settings: { annualTarget: 1450 } };
+  let state = { people: [], projects: [], assignments: [], pto: [], auditLog: [], holidays: [], settings: { annualTarget: 1450 } };
   let weekOffset = 0; // in units of WEEKS_VISIBLE
   let kpiYear = new Date().getFullYear();
   let saveTimer = null;
@@ -521,6 +523,7 @@
         if(!state.settings) state.settings = { annualTarget: 1450 };
         if(!state.pto) state.pto = [];
         if(!state.auditLog) state.auditLog = [];
+        if(!state.holidays) state.holidays = [];
         state.projects.forEach(p=>{
           if(!p.status){
             p.status = p.internal ? 'Internal' : 'Sold - Awaiting Kickoff';
@@ -653,6 +656,7 @@
     renderGrid();
     renderOverview();
     renderProjectView();
+    renderAuditLog();
   }
 
   function renderRange(){
@@ -819,36 +823,10 @@
   }
 
   function renderOverview(){
-    renderOverviewProjects();
     renderOverviewUtilization();
     renderOverviewBench();
     renderOverviewPerPerson();
     renderOverviewKpi();
-    renderAuditLog();
-  }
-
-  function renderOverviewProjects(){
-    const el = document.getElementById('rb-overview-projects');
-    if(!el) return;
-    if(state.projects.length === 0){
-      el.innerHTML = '<div style="color:var(--ink-soft);font-size:12px;">No projects yet &mdash; add one from the "Projects" button.</div>';
-      return;
-    }
-    el.innerHTML = '<div class="rb-list-manage" style="max-height:none;">' + state.projects.map(p=>`
-      <div class="row">
-        <span style="display:flex;align-items:center;gap:8px;">
-          <span class="rb-swatch" style="background:${statusColor(p)}"></span>
-          <span>
-            <div>${escapeHtml(p.name)}<span class="rb-status-badge" style="background:${statusColor(p)}22;color:${statusColor(p)};">${escapeHtml(p.status || 'No status')}</span>${p.sample ? '<span class="rb-sample-tag">SAMPLE</span>':''}</div>
-            <div style="font-size:10.5px;color:var(--ink-soft);margin-top:1px;">${projectRangeLabel(p)}${ownerName(p) ? ' &middot; Owner: '+escapeHtml(ownerName(p)) : ''}</div>
-            ${projectBudgetHtml(p)}
-          </span>
-        </span>
-        <button class="rb-icon-btn" data-notes="${p.id}" style="${p.notes ? 'color:var(--jmt-green-dark);font-weight:700;':''}">${p.notes ? 'Notes \u25cf' : 'Notes'}</button>
-      </div>`).join('') + '</div>';
-    el.querySelectorAll('[data-notes]').forEach(btn=>{
-      btn.addEventListener('click', ()=> openProjectNotesModal(btn.dataset.notes));
-    });
   }
 
   function openProjectNotesModal(projectId){
@@ -861,7 +839,7 @@
           <h3>Notes</h3>
           <div class="rb-modal-sub">${escapeHtml(project.name)}</div>
           <div class="rb-field">
-            <textarea id="rb-notes-text" rows="7" style="width:100%;font-family:inherit;font-size:13px;padding:8px 9px;border:1px solid var(--line);border-radius:6px;resize:vertical;color:var(--ink);">${escapeHtml(project.notes || '')}</textarea>
+            <textarea id="rb-notes-text" rows="10" style="width:100%;font-family:inherit;font-size:13px;padding:8px 9px;border:1px solid var(--line);border-radius:6px;resize:both;min-height:160px;color:var(--ink);">${escapeHtml(project.notes || '')}</textarea>
           </div>
           <div class="rb-modal-actions">
             <button class="rb-btn ghost" id="rb-notes-cancel">Cancel</button>
@@ -874,7 +852,7 @@
     document.getElementById('rb-notes-save').addEventListener('click', ()=>{
       project.notes = document.getElementById('rb-notes-text').value;
       logActivity(`Updated notes for "${project.name}"`);
-      scheduleSave(); closeModal(); renderOverviewProjects(); renderProjectViewDetail();
+      scheduleSave(); closeModal(); renderProjectViewDetail();
     });
   }
 
@@ -1003,6 +981,30 @@
     return Array.from(weeksSet).sort();
   }
 
+  function getProjectPhases(projectId){
+    const groups = {};
+    state.assignments.filter(a=>a.projectId===projectId && a.phase).forEach(a=>{
+      const g = groups[a.phase] || (groups[a.phase] = {label:a.phase, weeks:[], totalHours:0, personIds:new Set()});
+      g.weeks.push(a.weekStart);
+      g.totalHours += Number(a.hours||0);
+      g.personIds.add(a.personId);
+    });
+    const today = isoDate(mondayOf(new Date()));
+    const list = Object.values(groups).map(g=>{
+      const sortedWeeks = g.weeks.slice().sort();
+      const startWeek = sortedWeeks[0];
+      const endWeek = sortedWeeks[sortedWeeks.length-1];
+      return {
+        label: g.label,
+        startWeek, endWeek,
+        totalHours: g.totalHours,
+        people: Array.from(g.personIds).map(id=>personById(id)).filter(Boolean),
+        current: today >= startWeek && today <= endWeek,
+      };
+    }).sort((a,b)=> a.startWeek.localeCompare(b.startWeek));
+    return list;
+  }
+
   function renderProjectView(){
     const select = document.getElementById('rb-pv-select');
     if(!select) return;
@@ -1026,13 +1028,39 @@
     if(!project){ detailEl.innerHTML=''; rosterWrap.innerHTML=''; return; }
 
     detailEl.innerHTML = `
-      <div style="margin-top:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-        <span class="rb-swatch" style="background:${statusColor(project)}"></span>
-        <span class="rb-status-badge" style="background:${statusColor(project)}22;color:${statusColor(project)};margin-left:0;">${escapeHtml(project.status || 'No status')}</span>
-        ${project.sample ? '<span class="rb-sample-tag">SAMPLE</span>':''}
+      <div style="margin-top:14px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span class="rb-swatch" style="background:${statusColor(project)}"></span>
+          <span class="rb-status-badge" style="background:${statusColor(project)}22;color:${statusColor(project)};margin-left:0;">${escapeHtml(project.status || 'No status')}</span>
+          ${project.sample ? '<span class="rb-sample-tag">SAMPLE</span>':''}
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button class="rb-btn ghost sm" id="rb-pv-add-phase">+ Add phase</button>
+          <button class="rb-btn ghost sm" id="rb-pv-edit">Edit project</button>
+        </div>
       </div>
       <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">${projectRangeLabel(project)}${ownerName(project) ? ' &middot; Owner: '+escapeHtml(ownerName(project)) : ' &middot; No owner set'}</div>
       <div style="margin-top:6px;">${projectBudgetHtml(project)}</div>
+      ${(()=>{
+        const phases = getProjectPhases(project.id);
+        if(phases.length === 0) return '';
+        const rows = phases.map(ph=>{
+          const startD = new Date(ph.startWeek);
+          const endD = new Date(ph.endWeek); endD.setDate(endD.getDate()+6);
+          const peopleStr = ph.people.map(p=>escapeHtml(p.name)).join(', ') || '\u2014';
+          return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);">
+            <div>
+              <div style="font-size:12.5px;font-weight:700;${ph.current ? 'color:var(--jmt-green-dark);' : ''}">${escapeHtml(ph.label)}${ph.current ? ' <span class="rb-status-badge" style="background:var(--jmt-green-light);color:var(--jmt-green-dark);">CURRENT</span>' : ''}</div>
+              <div style="font-size:11px;color:var(--ink-soft);margin-top:1px;">${peopleStr} &middot; ${fmtShort(startD)} \u2013 ${fmtShort(endD)}</div>
+            </div>
+            <div style="font-weight:800;font-size:13px;white-space:nowrap;">${ph.totalHours}h</div>
+          </div>`;
+        }).join('');
+        return `<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
+          <div style="font-size:12px;font-weight:700;margin-bottom:4px;">Phases</div>
+          ${rows}
+        </div>`;
+      })()}
       <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
         <div style="display:flex;align-items:center;justify-content:space-between;">
           <div style="font-size:12px;font-weight:700;">Notes</div>
@@ -1042,6 +1070,8 @@
       </div>
     `;
     document.getElementById('rb-pv-notes').addEventListener('click', ()=> openProjectNotesModal(project.id));
+    document.getElementById('rb-pv-edit').addEventListener('click', ()=> openProjectEditModal(project, ()=> renderProjectViewDetail()));
+    document.getElementById('rb-pv-add-phase').addEventListener('click', ()=> openAddPhaseModal(project));
 
     const weeks = getProjectWeeks(project.id);
     if(weeks.length === 0){
@@ -1073,17 +1103,22 @@
     document.getElementById('rb-page-board').style.display = tab==='board' ? '' : 'none';
     document.getElementById('rb-page-overview').style.display = tab==='overview' ? '' : 'none';
     document.getElementById('rb-page-project').style.display = tab==='project' ? '' : 'none';
+    document.getElementById('rb-page-activity').style.display = tab==='activity' ? '' : 'none';
     document.getElementById('rb-tab-board').classList.toggle('active', tab==='board');
     document.getElementById('rb-tab-overview').classList.toggle('active', tab==='overview');
     document.getElementById('rb-tab-project').classList.toggle('active', tab==='project');
+    document.getElementById('rb-tab-activity').classList.toggle('active', tab==='activity');
     if(tab==='overview') renderOverview();
     if(tab==='project') renderProjectView();
+    if(tab==='activity') renderAuditLog();
   }
 
   // ---------- Modals ----------
   function closeModal(){ document.getElementById('rb-modal-host').innerHTML = ''; }
 
-  function showConfirm(message, onConfirm, onCancel){
+  function showConfirm(message, onConfirm, onCancel, okLabel, okDestructive){
+    if(okLabel === undefined) okLabel = 'Remove';
+    if(okDestructive === undefined) okDestructive = true;
     const host = document.getElementById('rb-modal-host');
     host.innerHTML = `
       <div class="rb-overlay" id="rb-overlay">
@@ -1092,7 +1127,7 @@
           <div class="rb-modal-sub">${escapeHtml(message)}</div>
           <div class="rb-modal-actions">
             <button class="rb-btn ghost" id="rb-confirm-cancel">Cancel</button>
-            <button class="rb-btn primary" id="rb-confirm-ok" style="background:var(--over);border-color:var(--over);">Remove</button>
+            <button class="rb-btn primary" id="rb-confirm-ok" ${okDestructive ? 'style="background:var(--over);border-color:var(--over);"' : ''}>${escapeHtml(okLabel)}</button>
           </div>
         </div>
       </div>`;
@@ -1184,7 +1219,7 @@
           <h3>Projects</h3>
           <div class="rb-modal-sub">Projects appear as color chips on the board.</div>
           <div class="rb-list-manage" id="rb-proj-list">${listHtml()}</div>
-          <div class="rb-field"><label>New project name</label><input id="rb-new-proj-name" placeholder="e.g. Acme Corp — Implementation"/></div>
+          <div class="rb-field"><label>New project name</label><textarea id="rb-new-proj-name" rows="1" placeholder="e.g. Acme Corp — Implementation" style="width:100%;font-family:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;resize:vertical;color:var(--ink);"></textarea></div>
           <div class="rb-row2">
             <div class="rb-field"><label>Start date <span style="font-weight:400;text-transform:none;">(optional)</span></label><input id="rb-new-proj-start" type="date"/></div>
             <div class="rb-field"><label>End date <span style="font-weight:400;text-transform:none;">(optional)</span></label><input id="rb-new-proj-end" type="date"/></div>
@@ -1243,14 +1278,15 @@
     });
   }
 
-  function openProjectEditModal(project){
+  function openProjectEditModal(project, onDone){
+    const done = onDone || (()=> openProjectsModal());
     const host = document.getElementById('rb-modal-host');
     host.innerHTML = `
       <div class="rb-overlay" id="rb-overlay">
         <div class="rb-modal">
           <h3>Edit project</h3>
           <div class="rb-modal-sub">Changes apply everywhere this project appears on the board.</div>
-          <div class="rb-field"><label>Project name</label><input id="rb-edit-proj-name" value="${escapeHtml(project.name)}"/></div>
+          <div class="rb-field"><label>Project name</label><textarea id="rb-edit-proj-name" rows="1" style="width:100%;font-family:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;resize:vertical;color:var(--ink);">${escapeHtml(project.name)}</textarea></div>
           <div class="rb-row2">
             <div class="rb-field"><label>Start date <span style="font-weight:400;text-transform:none;">(optional)</span></label><input id="rb-edit-proj-start" type="date" value="${project.startDate || ''}"/></div>
             <div class="rb-field"><label>End date <span style="font-weight:400;text-transform:none;">(optional)</span></label><input id="rb-edit-proj-end" type="date" value="${project.endDate || ''}"/></div>
@@ -1271,8 +1307,8 @@
           </div>
         </div>
       </div>`;
-    document.getElementById('rb-edit-proj-cancel').addEventListener('click', ()=> openProjectsModal());
-    document.getElementById('rb-overlay').addEventListener('click', (e)=>{ if(e.target.id==='rb-overlay') openProjectsModal(); });
+    document.getElementById('rb-edit-proj-cancel').addEventListener('click', ()=> { closeModal(); done(); });
+    document.getElementById('rb-overlay').addEventListener('click', (e)=>{ if(e.target.id==='rb-overlay'){ closeModal(); done(); } });
     document.getElementById('rb-edit-proj-save').addEventListener('click', ()=>{
       const name = document.getElementById('rb-edit-proj-name').value.trim();
       if(!name) return;
@@ -1284,7 +1320,8 @@
       project.status = document.getElementById('rb-edit-proj-status').value;
       project.ownerId = document.getElementById('rb-edit-proj-owner').value || null;
       logActivity(`Edited project "${project.name}"`);
-      scheduleSave(); render(); openProjectsModal();
+      scheduleSave(); render();
+      closeModal(); done();
     });
   }
 
@@ -1431,6 +1468,321 @@
     });
   }
 
+  function openAddPhaseModal(project){
+    if(state.people.length === 0){
+      showAlert('Add people to the board first.');
+      return;
+    }
+    const host = document.getElementById('rb-modal-host');
+    let segments = [{weeks:4, hours:4}];
+
+    function personOptionsHtml(){
+      return '<option value="">Choose person</option>' + state.people.map(p=>`<option value="${p.id}">${escapeHtml(p.name)} \u2014 ${escapeHtml(p.role)}</option>`).join('');
+    }
+    function segmentRowHtml(seg){
+      return `<div class="rb-assign-row">
+          <input data-field="weeks" type="number" min="1" step="1" value="${seg.weeks}" style="max-width:60px;" title="Weeks"/>
+          <span style="font-size:11px;color:var(--ink-soft);white-space:nowrap;">wks @</span>
+          <input data-field="hours" type="number" min="0" step="1" value="${seg.hours}" style="max-width:60px;" title="Hours/week"/>
+          <span style="font-size:11px;color:var(--ink-soft);white-space:nowrap;">hrs/wk</span>
+          <button class="rb-icon-btn" data-remove-seg>&times;</button>
+        </div>`;
+    }
+    function syncSegmentsFromDom(){
+      const segs = [];
+      document.querySelectorAll('#rb-segments-list .rb-assign-row').forEach(row=>{
+        const weeks = Math.max(1, Number(row.querySelector('[data-field="weeks"]').value) || 1);
+        const hours = Number(row.querySelector('[data-field="hours"]').value) || 0;
+        segs.push({weeks, hours});
+      });
+      segments = segs.length ? segs : [{weeks:1, hours:0}];
+    }
+    function renderSegments(){
+      document.getElementById('rb-segments-list').innerHTML = segments.map(segmentRowHtml).join('');
+      document.querySelectorAll('[data-remove-seg]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          syncSegmentsFromDom();
+          const row = btn.closest('.rb-assign-row');
+          const idx = Array.from(row.parentElement.children).indexOf(row);
+          segments.splice(idx,1);
+          if(segments.length===0) segments.push({weeks:1,hours:0});
+          renderSegments();
+        });
+      });
+    }
+
+    const referenceGoLive = project.endDate || '';
+    host.innerHTML = `
+      <div class="rb-overlay" id="rb-overlay">
+        <div class="rb-modal">
+          <h3>Add phase</h3>
+          <div class="rb-modal-sub">${escapeHtml(project.name)}</div>
+          <div class="rb-row2">
+            <div class="rb-field"><label>Phase name</label><input id="rb-addphase-label" placeholder="e.g. Optimization"/></div>
+            <div class="rb-field"><label>Person</label><select id="rb-addphase-person">${personOptionsHtml()}</select></div>
+          </div>
+          <div class="rb-field"><label>Start date</label><input id="rb-addphase-start" type="date"/></div>
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+            <button class="rb-btn ghost sm" id="rb-addphase-golive" type="button">Start = Go-Live${referenceGoLive ? ' ('+fmtShort(new Date(referenceGoLive))+')' : ''}</button>
+            <button class="rb-btn ghost sm" id="rb-addphase-before-golive" type="button">Start = Go-Live &minus;</button>
+            <input id="rb-addphase-before-weeks" type="number" min="1" step="1" value="4" style="max-width:50px;" title="Weeks before go-live"/>
+            <span style="font-size:11px;color:var(--ink-soft);">wks</span>
+          </div>
+          ${!referenceGoLive ? '<div style="font-size:11px;color:var(--ink-soft);margin-top:-8px;margin-bottom:10px;">No go-live date on this project yet \u2014 set one via "Edit project" to use these shortcuts, or just pick a start date directly.</div>' : ''}
+          <div style="font-size:11px;font-weight:700;color:var(--ink-soft);margin-bottom:4px;">Weekly hours <span style="font-weight:400;">(add a row for a rate change mid-phase)</span></div>
+          <div id="rb-segments-list"></div>
+          <button class="rb-btn ghost sm" id="rb-addphase-add-seg" type="button" style="margin-top:6px;">+ Add rate change</button>
+          <div class="rb-modal-actions">
+            <button class="rb-btn ghost" id="rb-addphase-cancel">Cancel</button>
+            <button class="rb-btn primary" id="rb-addphase-save">Add phase</button>
+          </div>
+        </div>
+      </div>`;
+    renderSegments();
+
+    document.getElementById('rb-addphase-cancel').addEventListener('click', closeModal);
+    document.getElementById('rb-overlay').addEventListener('click', (e)=>{ if(e.target.id==='rb-overlay') closeModal(); });
+    document.getElementById('rb-addphase-add-seg').addEventListener('click', ()=>{
+      syncSegmentsFromDom();
+      segments.push({weeks:1, hours:0});
+      renderSegments();
+    });
+    document.getElementById('rb-addphase-golive').addEventListener('click', ()=>{
+      if(!referenceGoLive) return;
+      document.getElementById('rb-addphase-start').value = isoDate(mondayOf(new Date(referenceGoLive)));
+    });
+    document.getElementById('rb-addphase-before-golive').addEventListener('click', ()=>{
+      if(!referenceGoLive) return;
+      const wks = Math.max(1, Number(document.getElementById('rb-addphase-before-weeks').value) || 1);
+      const d = new Date(referenceGoLive);
+      d.setDate(d.getDate() - wks*7);
+      document.getElementById('rb-addphase-start').value = isoDate(mondayOf(d));
+    });
+
+    document.getElementById('rb-addphase-save').addEventListener('click', ()=>{
+      syncSegmentsFromDom();
+      const label = document.getElementById('rb-addphase-label').value.trim();
+      const personId = document.getElementById('rb-addphase-person').value;
+      const startVal = document.getElementById('rb-addphase-start').value;
+      if(!label || !personId || !startVal){
+        showAlert('Give the phase a name, a person, and a start date.');
+        return;
+      }
+      let cursor = mondayOf(new Date(startVal));
+      let written = 0;
+      segments.forEach(seg=>{
+        for(let i=0;i<seg.weeks;i++){
+          const wk = isoDate(cursor);
+          state.assignments = state.assignments.filter(a=>!(a.personId===personId && a.projectId===project.id && a.weekStart===wk));
+          if(seg.hours > 0){
+            state.assignments.push({id:uid(), personId, projectId:project.id, weekStart:wk, hours:seg.hours, tentative:false, phase:label});
+            written++;
+          }
+          cursor = new Date(cursor); cursor.setDate(cursor.getDate()+7);
+        }
+      });
+      const person = personById(personId);
+      logActivity(`Added phase "${label}" to "${project.name}" for "${person ? person.name : 'someone'}" (${written} weekly assignments)`);
+      scheduleSave(); render(); closeModal();
+      renderProjectViewDetail();
+    });
+  }
+
+  function openPhasedProjectModal(){
+    if(state.people.length === 0){
+      showAlert('Add people to the board first.');
+      return;
+    }
+    const host = document.getElementById('rb-modal-host');
+    let phases = [
+      {label:'Design', personId:'', startDate:'', segments:[{weeks:6, hours:3}]},
+      {label:'Training', personId:'', startDate:'', segments:[{weeks:3, hours:4}]},
+      {label:'Hypercare', personId:'', startDate:'', segments:[{weeks:6, hours:2},{weeks:2, hours:4}]},
+    ];
+
+    function personOptionsHtml(selectedId){
+      return '<option value="">Choose person</option>' + state.people.map(p=>`<option value="${p.id}" ${p.id===selectedId?'selected':''}>${escapeHtml(p.name)} \u2014 ${escapeHtml(p.role)}</option>`).join('');
+    }
+
+    function segmentRowHtml(seg){
+      return `<div class="rb-assign-row">
+          <input data-field="weeks" type="number" min="1" step="1" value="${seg.weeks}" style="max-width:60px;" title="Weeks"/>
+          <span style="font-size:11px;color:var(--ink-soft);white-space:nowrap;">wks @</span>
+          <input data-field="hours" type="number" min="0" step="1" value="${seg.hours}" style="max-width:60px;" title="Hours/week"/>
+          <span style="font-size:11px;color:var(--ink-soft);white-space:nowrap;">hrs/wk</span>
+          <button class="rb-icon-btn" data-remove-seg>&times;</button>
+        </div>`;
+    }
+
+    function phaseCardHtml(phase, idx){
+      return `<div class="rb-section" data-phase-card="${idx}" style="margin-bottom:12px;padding:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">
+          <input data-field="label" value="${escapeHtml(phase.label)}" placeholder="Phase name, e.g. Design" style="font-weight:700;font-size:13px;border:none;border-bottom:1px solid var(--line);padding:2px 0;background:transparent;flex:1;color:var(--ink);"/>
+          <button class="rb-icon-btn" data-remove-phase>Remove phase</button>
+        </div>
+        <div class="rb-row2">
+          <div class="rb-field"><label>Person</label><select data-field="person">${personOptionsHtml(phase.personId)}</select></div>
+          <div class="rb-field"><label>Start date</label><input data-field="start" type="date" value="${phase.startDate}"/></div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+          <button class="rb-btn ghost sm" data-set-golive type="button">Start = Go-Live</button>
+          <button class="rb-btn ghost sm" data-set-before-golive type="button">Start = Go-Live &minus;</button>
+          <input data-field="before-weeks" type="number" min="1" step="1" value="4" style="max-width:50px;" title="Weeks before go-live"/>
+          <span style="font-size:11px;color:var(--ink-soft);">wks</span>
+        </div>
+        <div style="font-size:11px;font-weight:700;color:var(--ink-soft);margin-bottom:4px;">Weekly hours <span style="font-weight:400;">(add a row for a rate change mid-phase)</span></div>
+        <div data-segments-list>${phase.segments.map(segmentRowHtml).join('')}</div>
+        <button class="rb-btn ghost sm" data-add-seg type="button" style="margin-top:6px;">+ Add rate change</button>
+      </div>`;
+    }
+
+    function syncPhasesFromDom(){
+      document.querySelectorAll('[data-phase-card]').forEach(card=>{
+        const idx = Number(card.dataset.phaseCard);
+        const phase = phases[idx];
+        if(!phase) return;
+        phase.label = card.querySelector('[data-field="label"]').value;
+        phase.personId = card.querySelector('[data-field="person"]').value;
+        phase.startDate = card.querySelector('[data-field="start"]').value;
+        const segs = [];
+        card.querySelectorAll('[data-segments-list] .rb-assign-row').forEach(row=>{
+          const weeks = Math.max(1, Number(row.querySelector('[data-field="weeks"]').value) || 1);
+          const hours = Number(row.querySelector('[data-field="hours"]').value) || 0;
+          segs.push({weeks, hours});
+        });
+        phase.segments = segs.length ? segs : [{weeks:1, hours:0}];
+      });
+    }
+
+    function bindPhaseEvents(){
+      document.querySelectorAll('[data-phase-card]').forEach(card=>{
+        const idx = Number(card.dataset.phaseCard);
+        card.querySelector('[data-remove-phase]').addEventListener('click', ()=>{
+          syncPhasesFromDom();
+          phases.splice(idx,1);
+          renderPhases();
+        });
+        card.querySelector('[data-add-seg]').addEventListener('click', ()=>{
+          syncPhasesFromDom();
+          phases[idx].segments.push({weeks:1, hours:0});
+          renderPhases();
+        });
+        card.querySelectorAll('[data-remove-seg]').forEach(btn=>{
+          btn.addEventListener('click', ()=>{
+            syncPhasesFromDom();
+            const segRow = btn.closest('.rb-assign-row');
+            const segIdx = Array.from(segRow.parentElement.children).indexOf(segRow);
+            phases[idx].segments.splice(segIdx,1);
+            if(phases[idx].segments.length===0) phases[idx].segments.push({weeks:1,hours:0});
+            renderPhases();
+          });
+        });
+        card.querySelector('[data-set-golive]').addEventListener('click', ()=>{
+          const golive = document.getElementById('rb-phase-golive').value;
+          if(!golive) return;
+          card.querySelector('[data-field="start"]').value = isoDate(mondayOf(new Date(golive)));
+        });
+        card.querySelector('[data-set-before-golive]').addEventListener('click', ()=>{
+          const golive = document.getElementById('rb-phase-golive').value;
+          if(!golive) return;
+          const wks = Math.max(1, Number(card.querySelector('[data-field="before-weeks"]').value) || 1);
+          const d = new Date(golive);
+          d.setDate(d.getDate() - wks*7);
+          card.querySelector('[data-field="start"]').value = isoDate(mondayOf(d));
+        });
+      });
+      document.getElementById('rb-add-phase').addEventListener('click', ()=>{
+        syncPhasesFromDom();
+        phases.push({label:'', personId:'', startDate:'', segments:[{weeks:1, hours:0}]});
+        renderPhases();
+      });
+    }
+
+    function renderPhases(){
+      document.getElementById('rb-phases-list').innerHTML = phases.map(phaseCardHtml).join('');
+      bindPhaseEvents();
+    }
+
+    host.innerHTML = `
+      <div class="rb-overlay" id="rb-overlay">
+        <div class="rb-modal" style="max-width:560px;">
+          <h3>New phased project</h3>
+          <div class="rb-modal-sub">Set a go-live date, then lay out each phase &mdash; who's on it, when it starts, and the weekly hours (with rate changes if the pace shifts mid-phase).</div>
+          <div class="rb-field"><label>Project name</label><input id="rb-phase-name" placeholder="e.g. Acme Corp \u2014 Implementation"/></div>
+          <div class="rb-row2">
+            <div class="rb-field"><label>Go-live date</label><input id="rb-phase-golive" type="date"/></div>
+            <div class="rb-field"><label>Status</label>
+              <select id="rb-phase-status">${STATUS_OPTIONS.map(s=>`<option value="${s.name}" ${s.name==='In Design'?'selected':''}>${s.name}</option>`).join('')}</select>
+            </div>
+          </div>
+          <div class="rb-row2">
+            <div class="rb-field"><label>Owner <span style="font-weight:400;text-transform:none;">(optional)</span></label>
+              <select id="rb-phase-owner">
+                <option value="">No owner</option>
+                ${state.people.map(p=>`<option value="${p.id}">${escapeHtml(p.name)} \u2014 ${escapeHtml(p.role)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="rb-field"><label>Contracted hours <span style="font-weight:400;text-transform:none;">(optional)</span></label><input id="rb-phase-contracted" type="number" min="0" step="1" placeholder="e.g. 400"/></div>
+          </div>
+          <div id="rb-phases-list"></div>
+          <button class="rb-btn ghost sm" id="rb-add-phase" type="button">+ Add phase</button>
+          <div class="rb-modal-actions">
+            <button class="rb-btn ghost" id="rb-phase-cancel">Cancel</button>
+            <button class="rb-btn primary" id="rb-phase-create">Create project</button>
+          </div>
+        </div>
+      </div>`;
+    renderPhases();
+
+    document.getElementById('rb-phase-cancel').addEventListener('click', closeModal);
+    document.getElementById('rb-overlay').addEventListener('click', (e)=>{ if(e.target.id==='rb-overlay') closeModal(); });
+
+    document.getElementById('rb-phase-create').addEventListener('click', ()=>{
+      syncPhasesFromDom();
+      const name = document.getElementById('rb-phase-name').value.trim();
+      if(!name){ showAlert('Give the project a name first.'); return; }
+      const usablePhases = phases.filter(p=>p.personId && p.startDate);
+      if(usablePhases.length === 0){ showAlert('Add at least one phase with a person and a start date.'); return; }
+
+      const status = document.getElementById('rb-phase-status').value;
+      const ownerId = document.getElementById('rb-phase-owner').value || null;
+      const contractedVal = document.getElementById('rb-phase-contracted').value;
+      const contractedHours = contractedVal ? Number(contractedVal) : null;
+      const goLive = document.getElementById('rb-phase-golive').value || null;
+
+      let earliestStart = null, latestEnd = null;
+      const project = {id:uid(), name, status, startDate:null, endDate:goLive, contractedHours, ownerId, notes:''};
+      state.projects.push(project);
+
+      let assignmentsWritten = 0;
+      usablePhases.forEach(phase=>{
+        let cursor = mondayOf(new Date(phase.startDate));
+        phase.segments.forEach(seg=>{
+          for(let i=0;i<seg.weeks;i++){
+            const wk = isoDate(cursor);
+            if(!earliestStart || wk < earliestStart) earliestStart = wk;
+            if(!latestEnd || wk > latestEnd) latestEnd = wk;
+            state.assignments = state.assignments.filter(a=>!(a.personId===phase.personId && a.projectId===project.id && a.weekStart===wk));
+            if(seg.hours > 0){
+              state.assignments.push({id:uid(), personId:phase.personId, projectId:project.id, weekStart:wk, hours:seg.hours, tentative:false, phase:phase.label || null});
+              assignmentsWritten++;
+            }
+            cursor = new Date(cursor); cursor.setDate(cursor.getDate()+7);
+          }
+        });
+      });
+      project.startDate = earliestStart;
+      if(!project.endDate) project.endDate = latestEnd;
+
+      logActivity(`Created phased project "${name}" (${usablePhases.length} phase${usablePhases.length>1?'s':''}, ${assignmentsWritten} weekly assignments)`);
+      scheduleSave();
+      projectViewSelectedId = project.id;
+      render();
+      closeModal();
+      switchTab('project');
+    });
+  }
+
   function openBulkAssignModal(){
     if(state.projects.length === 0){
       showAlert('Add a project first (use the "Projects" button) before bulk assigning.');
@@ -1504,6 +1856,136 @@
     });
   }
 
+  function holidayWeeklyTotals(){
+    const totals = {};
+    state.holidays.forEach(h=>{
+      const wk = isoDate(mondayOf(new Date(h.date)));
+      totals[wk] = (totals[wk] || 0) + Number(h.hours || 0);
+    });
+    return totals;
+  }
+
+  function recomputeHolidayPto(){
+    const totals = holidayWeeklyTotals();
+    const weeks = Object.keys(totals);
+    // fully rebuild holiday-tagged PTO from the current holiday list, so edits/removals are reflected correctly
+    state.pto = state.pto.filter(p=>!p.holiday);
+    state.people.forEach(person=>{
+      weeks.forEach(week=>{
+        state.pto.push({id:uid(), personId:person.id, weekStart:week, hours:totals[week], holiday:true});
+      });
+    });
+  }
+
+  function parseHolidayLine(line){
+    const parts = line.split(',').map(s=>s.trim()).filter(Boolean);
+    if(parts.length < 2) return null;
+    const label = parts[0];
+    const d = new Date(parts[1]);
+    if(isNaN(d.getTime())) return null;
+    const hoursVal = parts[2] !== undefined ? Number(parts[2]) : 8;
+    return {label, date: isoDate(d), hours: isNaN(hoursVal) ? 8 : hoursVal};
+  }
+
+  function openHolidaysModal(){
+    const host = document.getElementById('rb-modal-host');
+    function listHtml(){
+      if(state.holidays.length === 0) return '<div style="color:var(--ink-soft);font-size:12px;padding:6px 0;">No holidays added yet.</div>';
+      const sorted = [...state.holidays].sort((a,b)=> a.date.localeCompare(b.date));
+      return sorted.map(h=>`
+        <div class="row">
+          <span>${escapeHtml(h.label)} <span style="color:var(--ink-soft);font-weight:400;">&mdash; ${fmtShort(new Date(h.date))}, ${h.hours}h</span></span>
+          <button class="rb-icon-btn" data-del-holiday="${h.id}">Remove</button>
+        </div>`).join('');
+    }
+    host.innerHTML = `
+      <div class="rb-overlay" id="rb-overlay">
+        <div class="rb-modal">
+          <h3>Holidays</h3>
+          <div class="rb-modal-sub">Applies as PTO to everyone currently on the board, stacking with any other time off already entered.</div>
+          <div class="rb-list-manage" id="rb-holiday-list">${listHtml()}</div>
+          <div class="rb-row2">
+            <div class="rb-field" style="flex:2"><label>Holiday name</label><input id="rb-hol-label" placeholder="e.g. Labor Day"/></div>
+            <div class="rb-field" style="flex:1"><label>Date</label><input id="rb-hol-date" type="date"/></div>
+            <div class="rb-field" style="flex:1;max-width:80px;"><label>Hours</label><input id="rb-hol-hours" type="number" min="0" step="1" value="8"/></div>
+          </div>
+          <button class="rb-btn ghost sm" id="rb-hol-add">+ Add holiday</button>
+
+          <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
+            <div class="rb-field">
+              <label>Bulk add <span style="font-weight:400;text-transform:none;">(one per line: Name, Date, Hours &mdash; hours optional, defaults to 8)</span></label>
+              <textarea id="rb-hol-bulk" rows="6" placeholder="Labor Day, 2026-09-07, 8&#10;Christmas Eve, 2026-12-24, 4" style="width:100%;font-family:inherit;font-size:12.5px;padding:8px 9px;border:1px solid var(--line);border-radius:6px;resize:both;min-height:100px;color:var(--ink);"></textarea>
+            </div>
+            <button class="rb-btn ghost sm" id="rb-hol-bulk-add">Add bulk list</button>
+          </div>
+
+          <div class="rb-modal-actions" style="justify-content:space-between;">
+            <button class="rb-btn ghost sm" id="rb-hol-apply">Apply to everyone</button>
+            <button class="rb-btn ghost" id="rb-hol-close">Close</button>
+          </div>
+        </div>
+      </div>`;
+    document.getElementById('rb-hol-close').addEventListener('click', closeModal);
+    document.getElementById('rb-overlay').addEventListener('click', (e)=>{ if(e.target.id==='rb-overlay') closeModal(); });
+
+    function refreshList(){
+      document.getElementById('rb-holiday-list').innerHTML = listHtml();
+      document.querySelectorAll('[data-del-holiday]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const id = btn.dataset.delHoliday;
+          const h = state.holidays.find(hh=>hh.id===id);
+          state.holidays = state.holidays.filter(hh=>hh.id!==id);
+          recomputeHolidayPto();
+          if(h) logActivity(`Removed holiday "${h.label}"`);
+          scheduleSave(); render();
+          refreshList();
+        });
+      });
+    }
+    refreshList();
+
+    document.getElementById('rb-hol-add').addEventListener('click', ()=>{
+      const label = document.getElementById('rb-hol-label').value.trim();
+      const dateVal = document.getElementById('rb-hol-date').value;
+      const hours = Number(document.getElementById('rb-hol-hours').value) || 0;
+      if(!label || !dateVal) return;
+      state.holidays.push({id:uid(), label, date:dateVal, hours});
+      recomputeHolidayPto();
+      logActivity(`Added holiday "${label}" (${fmtShort(new Date(dateVal))}, ${hours}h)`);
+      scheduleSave(); render();
+      document.getElementById('rb-hol-label').value = '';
+      document.getElementById('rb-hol-date').value = '';
+      document.getElementById('rb-hol-hours').value = '8';
+      refreshList();
+    });
+
+    document.getElementById('rb-hol-bulk-add').addEventListener('click', ()=>{
+      const text = document.getElementById('rb-hol-bulk').value;
+      const lines = text.split('\n').map(s=>s.trim()).filter(Boolean);
+      let added = 0, skipped = 0;
+      lines.forEach(line=>{
+        const parsed = parseHolidayLine(line);
+        if(!parsed){ skipped++; return; }
+        state.holidays.push({id:uid(), label:parsed.label, date:parsed.date, hours:parsed.hours});
+        added++;
+      });
+      if(added > 0){
+        recomputeHolidayPto();
+        logActivity(`Bulk-added ${added} holiday${added>1?'s':''}`);
+        scheduleSave(); render();
+      }
+      document.getElementById('rb-hol-bulk').value = '';
+      refreshList();
+      if(skipped > 0) showAlert(`Added ${added}. Couldn't parse ${skipped} line(s) \u2014 use "Name, Date, Hours" per line, e.g. "Labor Day, 2026-09-07, 8".`);
+    });
+
+    document.getElementById('rb-hol-apply').addEventListener('click', ()=>{
+      recomputeHolidayPto();
+      scheduleSave(); render();
+      showAlert(`Applied ${state.holidays.length} holiday(s) to ${state.people.length} people. Safe to run again any time \u2014 e.g. after adding someone new to the board.`);
+    });
+  }
+
   function exportCsv(){
     const rows = [['Person','Role','Status','Project','Week','Hours','Tentative']];
     state.assignments.forEach(a=>{
@@ -1540,12 +2022,15 @@
   document.getElementById('rb-tab-board').addEventListener('click', ()=> switchTab('board'));
   document.getElementById('rb-tab-overview').addEventListener('click', ()=> switchTab('overview'));
   document.getElementById('rb-tab-project').addEventListener('click', ()=> switchTab('project'));
+  document.getElementById('rb-tab-activity').addEventListener('click', ()=> switchTab('activity'));
   document.getElementById('rb-pv-select').addEventListener('change', (e)=>{
     projectViewSelectedId = e.target.value;
     renderProjectViewDetail();
   });
   document.getElementById('rb-bulk-assign').addEventListener('click', ()=> openBulkAssignModal());
+  document.getElementById('rb-new-phased-project').addEventListener('click', ()=> openPhasedProjectModal());
   document.getElementById('rb-export-csv').addEventListener('click', ()=> exportCsv());
+  document.getElementById('rb-manage-holidays').addEventListener('click', ()=> openHolidaysModal());
   document.getElementById('rb-filter').addEventListener('input', (e)=>{
     filterText = e.target.value;
     renderGrid();
