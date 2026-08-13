@@ -240,12 +240,12 @@
   .rb-modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
 
   .rb-assign-row{
-    display:flex;gap:8px;align-items:center;
+    display:flex;gap:8px;align-items:center;flex-wrap:wrap;
     padding:8px 0;border-bottom:1px solid var(--line);
   }
   .rb-assign-row:last-of-type{border-bottom:none;}
-  .rb-assign-row select{flex:2;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 7px;font-family:inherit;font-size:13px;}
-  .rb-assign-row input{flex:1;min-width:0;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 7px;font-family:inherit;font-size:13px;}
+  .rb-assign-row select{flex:2;min-width:140px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 7px;font-family:inherit;font-size:13px;}
+  .rb-assign-row input:not([type="checkbox"]){flex:1;min-width:50px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 7px;font-family:inherit;font-size:13px;}
   .rb-list-manage{max-height:220px;overflow:auto;margin-bottom:10px;}
   .rb-list-manage .row{
     display:flex;align-items:center;justify-content:space-between;
@@ -333,13 +333,16 @@
         <button class="rb-btn ghost sm" id="rb-next" aria-label="Next weeks">&rarr;</button>
       </div>
       <button class="rb-btn" id="rb-manage-projects">Projects</button>
+      <button class="rb-btn ghost" id="rb-manage-statuses">Statuses</button>
       <button class="rb-btn" id="rb-add-person">+ Person</button>
+      <button class="rb-btn ghost" id="rb-view-archived">Archived</button>
       <button class="rb-btn" id="rb-bulk-assign">Bulk assign</button>
       <button class="rb-btn" id="rb-new-phased-project">+ Phased project</button>
       <button class="rb-btn ghost" id="rb-export-csv">Export CSV</button>
       <button class="rb-btn ghost" id="rb-manage-holidays">Holidays</button>
       <button class="rb-btn ghost" id="rb-theme-toggle">\ud83c\udf19 Dark mode</button>
       <input class="rb-filter-input" id="rb-filter" placeholder="Filter by name or role\u2026"/>
+      <select class="rb-filter-input" id="rb-team-filter" style="min-width:140px;"><option value="">All teams</option></select>
     </div>
   </div>
 
@@ -364,28 +367,19 @@
 
   <div id="rb-page-overview" style="display:none;">
     <div class="rb-section">
+      <h2>Parking lot <span style="font-weight:400;color:var(--ink-soft);font-size:12px;">(not yet staffed)</span></h2>
+      <div class="rb-section-sub">Sold or upcoming projects with no one assigned yet &mdash; nothing here counts toward anyone's utilization.</div>
+      <div id="rb-parking-lot"></div>
+    </div>
+    <div class="rb-section">
       <h2>Weekly utilization</h2>
-      <div class="rb-section-sub">Committed hours vs. total team capacity (after PTO). Use the &larr; / &rarr; on the Board tab to change weeks.</div>
-      <div style="font-size:12px;font-weight:700;margin:10px 0 6px;">PM / Coordinator</div>
-      <div style="overflow:auto;" id="rb-overview-util-wrap-pm">
-        <table class="rb-overview-table" id="rb-overview-util-table-pm"></table>
-      </div>
-      <div style="font-size:12px;font-weight:700;margin:16px 0 6px;">Consultants</div>
-      <div style="overflow:auto;" id="rb-overview-util-wrap-consultant">
-        <table class="rb-overview-table" id="rb-overview-util-table-consultant"></table>
-      </div>
+      <div class="rb-section-sub">Committed hours vs. total team capacity (after PTO), grouped by team. Use the &larr; / &rarr; on the Board tab to change weeks.</div>
+      <div id="rb-overview-util-by-team"></div>
     </div>
     <div class="rb-section">
       <h2>Open capacity <span style="font-weight:400;color:var(--ink-soft);font-size:12px;">(first visible week)</span></h2>
-      <div class="rb-section-sub">Who has room to take on more work this week, most open first.</div>
-      <div style="font-size:12px;font-weight:700;margin:10px 0 6px;">PM / Coordinator</div>
-      <div style="overflow:auto;" id="rb-overview-bench-wrap-pm">
-        <table class="rb-overview-table" id="rb-overview-bench-table-pm"></table>
-      </div>
-      <div style="font-size:12px;font-weight:700;margin:16px 0 6px;">Consultants</div>
-      <div style="overflow:auto;" id="rb-overview-bench-wrap-consultant">
-        <table class="rb-overview-table" id="rb-overview-bench-table-consultant"></table>
-      </div>
+      <div class="rb-section-sub">Who has room to take on more work this week, most open first, grouped by team.</div>
+      <div id="rb-overview-bench-by-team"></div>
     </div>
     <div class="rb-section">
       <h2>Per-person utilization</h2>
@@ -447,19 +441,29 @@
   const THEME_STORAGE_KEY = 'resource-board-theme';
   const WEEKS_VISIBLE = 6;
 
-  const STATUS_OPTIONS = [
-    {name:'Internal', color:'#5E902E'},
-    {name:'Future Ops', color:'#3B6FA5'},
-    {name:'Sold - Awaiting Kickoff', color:'#C08A1E'},
-    {name:'In Design', color:'#8A5CB0'},
-    {name:'In Training', color:'#2E8A82'},
-    {name:'Post Go-Live', color:'#5B6E3E'},
-    {name:'ISR/Demo/CAM calls', color:'#A44B7C'},
-    {name:'CAM Projects', color:'#B8481E'},
+  const MILESTONE_FIELDS = [
+    {key:'kickoff', label:'Kickoff'},
+    {key:'designEnd', label:'Design End'},
+    {key:'build', label:'Build'},
+    {key:'goLive', label:'Go-Live'},
+    {key:'transferSupport', label:'Transfer to Support'},
   ];
+
+  const DEFAULT_STATUS_OPTIONS = [
+    {id:'st_internal', name:'Internal', color:'#5E902E', internal:true},
+    {id:'st_futureops', name:'Future Ops', color:'#3B6FA5', internal:false},
+    {id:'st_sold', name:'Sold - Awaiting Kickoff', color:'#C08A1E', internal:false},
+    {id:'st_design', name:'In Design', color:'#8A5CB0', internal:false},
+    {id:'st_training', name:'In Training', color:'#2E8A82', internal:false},
+    {id:'st_golive', name:'Post Go-Live', color:'#5B6E3E', internal:false},
+    {id:'st_isr', name:'ISR/Demo/CAM calls', color:'#A44B7C', internal:false},
+    {id:'st_cam', name:'CAM Projects', color:'#B8481E', internal:false},
+  ];
+  const STATUS_COLOR_CHOICES = ['#5E902E','#3B6FA5','#B8481E','#8A5CB0','#C08A1E','#2E8A82','#A44B7C','#5B6E3E','#6B7A99','#22271F'];
   const DEFAULT_STATUS_COLOR = '#8A8F80';
+  function statusOptions(){ return state.statusOptions; }
   function statusColor(project){
-    const match = STATUS_OPTIONS.find(s=>s.name === project.status);
+    const match = statusOptions().find(s=>s.name === project.status);
     return match ? match.color : (project.color || DEFAULT_STATUS_COLOR);
   }
   function ownerName(project){
@@ -467,30 +471,27 @@
     return owner ? owner.name : null;
   }
   function isInternalStatus(project){
-    return project.status === 'Internal';
+    const match = statusOptions().find(s=>s.name === project.status);
+    return match ? !!match.internal : (project.status === 'Internal');
   }
-  const ROLE_OPTIONS = [
-    {value:'PM 1', group:'pm'},
-    {value:'PM 2', group:'pm'},
-    {value:'Coordinator', group:'pm'},
-    {value:'Sr. Consultant', group:'consultant'},
-    {value:'Jr. Consultant', group:'consultant'},
-    {value:'Support', group:'consultant'},
-  ];
-  function roleGroup(role){
-    const match = ROLE_OPTIONS.find(r=>r.value===role);
-    if(match) return match.group;
-    return /consultant/i.test(role || '') ? 'consultant' : 'pm';
+  const DEFAULT_TEAM = 'Professional Services';
+  function getDistinctTeams(){
+    const teams = new Set(state.people.filter(p=>!p.archived).map(p=> p.team || DEFAULT_TEAM));
+    return Array.from(teams).sort();
   }
-  function peopleInGroup(group){
-    return state.people.filter(p=> roleGroup(p.role) === group);
+  function getDistinctRoles(){
+    return Array.from(new Set(state.people.map(p=>p.role).filter(Boolean))).sort();
+  }
+  function peopleInTeam(team){
+    return state.people.filter(p=> !p.archived && (p.team || DEFAULT_TEAM) === team);
   }
 
-  let state = { people: [], projects: [], assignments: [], pto: [], auditLog: [], holidays: [], settings: { annualTarget: 1450 } };
+  let state = { people: [], projects: [], assignments: [], pto: [], auditLog: [], holidays: [], statusOptions: DEFAULT_STATUS_OPTIONS.map(s=>Object.assign({},s)), settings: { annualTarget: 1450 } };
   let weekOffset = 0; // in units of WEEKS_VISIBLE
   let kpiYear = new Date().getFullYear();
   let saveTimer = null;
   let filterText = '';
+  let teamFilter = '';
   let projectViewSelectedId = null;
 
   function logActivity(text){
@@ -552,6 +553,12 @@
         if(!state.pto) state.pto = [];
         if(!state.auditLog) state.auditLog = [];
         if(!state.holidays) state.holidays = [];
+        state.projects.forEach(p=>{ if(!p.milestones) p.milestones = {}; });
+        state.people.forEach(p=>{ if(!p.team) p.team = DEFAULT_TEAM; });
+        if(!state.statusOptions || state.statusOptions.length === 0){
+          state.statusOptions = DEFAULT_STATUS_OPTIONS.map(s=>Object.assign({},s));
+        }
+        state.people.forEach(p=>{ if(p.archived === undefined) p.archived = false; });
         state.projects.forEach(p=>{
           if(!p.status){
             p.status = p.internal ? 'Internal' : 'Sold - Awaiting Kickoff';
@@ -568,10 +575,10 @@
     const pmId = uid(), pcId = uid(), c1 = uid(), c2 = uid();
     const p1 = uid(), p2 = uid();
     state.people = [
-      {id:pmId, name:'Sample PM', role:'PM 1', capacity:40, sample:true},
-      {id:pcId, name:'Sample Coordinator', role:'Coordinator', capacity:40, sample:true},
-      {id:c1, name:'Sample Consultant A', role:'Sr. Consultant', capacity:40, sample:true},
-      {id:c2, name:'Sample Consultant B', role:'Jr. Consultant', capacity:32, sample:true},
+      {id:pmId, name:'Sample PM', role:'PM 1', team:DEFAULT_TEAM, capacity:40, sample:true},
+      {id:pcId, name:'Sample Coordinator', role:'Coordinator', team:DEFAULT_TEAM, capacity:40, sample:true},
+      {id:c1, name:'Sample Consultant A', role:'Sr. Consultant', team:DEFAULT_TEAM, capacity:40, sample:true},
+      {id:c2, name:'Sample Consultant B', role:'Jr. Consultant', team:DEFAULT_TEAM, capacity:32, sample:true},
     ];
     const weeksForSample = getWeeks();
     const rangeStart = weeksForSample[0];
@@ -662,6 +669,10 @@
       .reduce((s,a)=>s+Number(a.hours||0),0);
   }
 
+  function projectHasAssignments(projectId){
+    return state.assignments.some(a=>a.projectId===projectId);
+  }
+
   function getPtoHours(personId, week){
     return state.pto
       .filter(p=>p.personId===personId && p.weekStart===week)
@@ -712,10 +723,26 @@
 
   function render(){
     renderRange();
+    renderTeamFilterOptions();
     renderGrid();
     renderOverview();
     renderProjectView();
     renderAuditLog();
+    const archivedBtn = document.getElementById('rb-view-archived');
+    if(archivedBtn){
+      const n = state.people.filter(p=>p.archived).length;
+      archivedBtn.textContent = n > 0 ? `Archived (${n})` : 'Archived';
+    }
+  }
+
+  function renderTeamFilterOptions(){
+    const sel = document.getElementById('rb-team-filter');
+    if(!sel) return;
+    const teams = getDistinctTeams();
+    const current = sel.value;
+    sel.innerHTML = '<option value="">All teams</option>' + teams.map(t=>`<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+    if(teams.includes(current)) sel.value = current;
+    else teamFilter = '';
   }
 
   function renderRange(){
@@ -730,6 +757,8 @@
     const grid = document.getElementById('rb-grid');
     const q = filterText.trim().toLowerCase();
     const visiblePeople = state.people.filter(p=>{
+      if(p.archived) return false;
+      if(teamFilter && (p.team || DEFAULT_TEAM) !== teamFilter) return false;
       if(!q) return true;
       return p.name.toLowerCase().includes(q) || p.role.toLowerCase().includes(q);
     });
@@ -750,7 +779,11 @@
     const table = document.getElementById('rb-grid');
 
     if(visiblePeople.length === 0){
-      table.innerHTML = `<tbody><tr><td style="padding:24px;color:var(--ink-soft);font-size:13px;">No one matches "${escapeHtml(filterText)}".</td></tr></tbody>`;
+      const activeCount = state.people.filter(p=>!p.archived).length;
+      const msg = activeCount === 0
+        ? 'Everyone on the board is archived. Use "Archived" in the top bar to restore someone.'
+        : `No one matches${filterText ? ' "'+escapeHtml(filterText)+'"' : ' this filter'}.`;
+      table.innerHTML = `<tbody><tr><td style="padding:24px;color:var(--ink-soft);font-size:13px;">${msg}</td></tr></tbody>`;
       return;
     }
 
@@ -765,11 +798,12 @@
     visiblePeople.forEach(person=>{
       tbody += `<tr><td class="rb-col-person">
         <div class="rb-person-name">${escapeHtml(person.name)}${person.sample ? '<span class="rb-sample-tag">SAMPLE</span>':''}</div>
-        <div class="rb-person-role">${escapeHtml(person.role)}</div>
+        <div class="rb-person-role">${escapeHtml(person.role)} <span style="color:var(--jmt-green-dark);">&middot; ${escapeHtml(person.team || DEFAULT_TEAM)}</span></div>
         <div class="rb-person-cap">${person.capacity}h / wk capacity</div>
         <div class="rb-person-actions">
           <button class="rb-icon-btn" data-edit-person="${person.id}" title="Edit">Edit</button>
-          <button class="rb-icon-btn" data-del-person="${person.id}" title="Remove">Remove</button>
+          <button class="rb-icon-btn" data-archive-person="${person.id}" title="Archive">Archive</button>
+          <button class="rb-icon-btn" data-del-person="${person.id}" title="Remove permanently">Remove</button>
         </div>
       </td>`;
       weeks.forEach(week=>{
@@ -778,6 +812,7 @@
         const capacity = effectiveCapacity(person, week);
         const total = committedHours(person.id, week);
         const pct = capacity > 0 ? Math.round((total/capacity)*100) : (total > 0 ? 999 : 0);
+        const pctLabel = capacity > 0 ? (pct + '%') : (total > 0 ? 'No capacity' : '0%');
         const status = utilStatus(pct);
         let cell = `<td class="rb-cell" data-person="${person.id}" data-week="${week}">`;
         if(assigns.length === 0 && pto === 0){
@@ -794,7 +829,7 @@
             cell += `<span class="rb-chip ${cls}" style="background:${statusColor(proj)}" title="${escapeHtml(proj.name)} \u2022 ${escapeHtml(proj.status || '')} \u2022 ${escapeHtml(projectRangeLabel(proj))}${a.tentative ? ' \u2022 tentative':''}">${tag ? '<span class="h">'+tag+'</span>':''}${escapeHtml(proj.name)} <span class="h">${a.hours}h</span></span>`;
           });
           cell += `<div class="rb-util-bar"><div class="rb-util-fill" style="width:${Math.min(pct,100)}%;background:${status.color}"></div></div>`;
-          cell += `<div class="rb-util-label" style="color:${status.color}">${pct}%</div>`;
+          cell += `<div class="rb-util-label" style="color:${status.color}">${pctLabel}</div>`;
         }
         cell += '</td>';
         tbody += cell;
@@ -825,16 +860,29 @@
     table.querySelectorAll('[data-edit-person]').forEach(btn=>{
       btn.addEventListener('click', (e)=>{ e.stopPropagation(); openPersonModal(btn.dataset.editPerson); });
     });
+    table.querySelectorAll('[data-archive-person]').forEach(btn=>{
+      btn.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        const id = btn.dataset.archivePerson;
+        const person = personById(id);
+        if(!person) return;
+        showConfirm(`Archive ${person.name}? They'll disappear from the board and utilization, but their history is kept \u2014 restore them any time from "Archived".`, ()=>{
+          person.archived = true;
+          logActivity(`Archived person "${person.name}"`);
+          scheduleSave(); render();
+        }, null, 'Archive', false);
+      });
+    });
     table.querySelectorAll('[data-del-person]').forEach(btn=>{
       btn.addEventListener('click', (e)=>{
         e.stopPropagation();
         const id = btn.dataset.delPerson;
         const personName = personById(id) ? personById(id).name : 'person';
-        showConfirm('Remove this person and their assignments?', ()=>{
+        showConfirm(`Permanently remove ${personName} and all their assignments? This can't be undone \u2014 use "Archive" instead if they might come back or you want to keep their history.`, ()=>{
           state.people = state.people.filter(p=>p.id!==id);
           state.assignments = state.assignments.filter(a=>a.personId!==id);
           state.pto = state.pto.filter(p=>p.personId!==id);
-          logActivity(`Removed person "${personName}"`);
+          logActivity(`Permanently removed person "${personName}"`);
           scheduleSave(); render();
         });
       });
@@ -853,7 +901,7 @@
     if(yearInput && document.activeElement !== yearInput) yearInput.value = kpiYear;
     if(targetInput && document.activeElement !== targetInput) targetInput.value = state.settings.annualTarget;
 
-    if(state.people.length === 0){
+    if(state.people.filter(p=>!p.archived).length === 0){
       wrap.innerHTML = '<div style="color:var(--ink-soft);font-size:12px;">Add people to the board to see the annual KPI.</div>';
       return;
     }
@@ -863,7 +911,7 @@
 
     let thead = '<thead><tr><th>Person</th><th>Logged hours</th><th>Target</th><th>% of target</th></tr></thead>';
     let rows = '';
-    state.people.forEach(person=>{
+    state.people.filter(p=>!p.archived).forEach(person=>{
       const logged = state.assignments
         .filter(a=>a.personId===person.id && new Date(a.weekStart).getFullYear()===kpiYear)
         .reduce((s,a)=>{
@@ -882,10 +930,38 @@
   }
 
   function renderOverview(){
+    renderParkingLot();
     renderOverviewUtilization();
     renderOverviewBench();
     renderOverviewPerPerson();
     renderOverviewKpi();
+  }
+
+  function renderParkingLot(){
+    const el = document.getElementById('rb-parking-lot');
+    if(!el) return;
+    const unassigned = state.projects.filter(p=>!projectHasAssignments(p.id));
+    if(unassigned.length === 0){
+      el.innerHTML = '<div style="color:var(--ink-soft);font-size:12px;">Nothing parked right now &mdash; every project has at least one person staffed.</div>';
+      return;
+    }
+    el.innerHTML = '<div class="rb-list-manage" style="max-height:none;">' + unassigned.map(p=>`
+      <div class="row">
+        <span style="display:flex;align-items:center;gap:8px;">
+          <span class="rb-swatch" style="background:${statusColor(p)}"></span>
+          <span>
+            <div>${escapeHtml(p.name)}<span class="rb-status-badge" style="background:${statusColor(p)}22;color:${statusColor(p)};">${escapeHtml(p.status || 'No status')}</span></div>
+            <div style="font-size:10.5px;color:var(--ink-soft);margin-top:1px;">${projectRangeLabel(p)}${ownerName(p) ? ' &middot; Owner: '+escapeHtml(ownerName(p)) : ''}${p.contractedHours ? ' &middot; '+p.contractedHours+'h contracted' : ''}</div>
+          </span>
+        </span>
+        <button class="rb-icon-btn" data-park-view="${p.id}">View &rarr;</button>
+      </div>`).join('') + '</div>';
+    el.querySelectorAll('[data-park-view]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        projectViewSelectedId = btn.dataset.parkView;
+        switchTab('project');
+      });
+    });
   }
 
   function openProjectNotesModal(projectId){
@@ -916,16 +992,26 @@
   }
 
   function renderOverviewUtilization(){
-    renderOverviewUtilizationGroup('pm', 'rb-overview-util-wrap-pm', 'rb-overview-util-table-pm');
-    renderOverviewUtilizationGroup('consultant', 'rb-overview-util-wrap-consultant', 'rb-overview-util-table-consultant');
+    const container = document.getElementById('rb-overview-util-by-team');
+    if(!container) return;
+    const teams = getDistinctTeams();
+    if(teams.length === 0){
+      container.innerHTML = '<div style="color:var(--ink-soft);font-size:12px;">Add people to the board to see utilization.</div>';
+      return;
+    }
+    container.innerHTML = teams.map((t,i)=>`
+      <div style="font-size:12px;font-weight:700;margin:${i===0?10:16}px 0 6px;">${escapeHtml(t)}</div>
+      <div style="overflow:auto;" id="rb-overview-util-wrap-${i}"></div>
+    `).join('');
+    teams.forEach((t,i)=> renderOverviewUtilizationGroup(t, `rb-overview-util-wrap-${i}`, `rb-overview-util-table-${i}`));
   }
 
-  function renderOverviewUtilizationGroup(group, wrapId, tableId){
+  function renderOverviewUtilizationGroup(team, wrapId, tableId){
     const wrap = document.getElementById(wrapId);
     if(!wrap) return;
-    const people = peopleInGroup(group);
+    const people = peopleInTeam(team);
     if(people.length === 0){
-      wrap.innerHTML = '<div style="color:var(--ink-soft);font-size:12px;">No one in this group yet.</div>';
+      wrap.innerHTML = '<div style="color:var(--ink-soft);font-size:12px;">No one on this team yet.</div>';
       return;
     }
     wrap.innerHTML = `<table class="rb-overview-table" id="${tableId}"></table>`;
@@ -969,16 +1055,26 @@
   }
 
   function renderOverviewBench(){
-    renderOverviewBenchGroup('pm', 'rb-overview-bench-wrap-pm');
-    renderOverviewBenchGroup('consultant', 'rb-overview-bench-wrap-consultant');
+    const container = document.getElementById('rb-overview-bench-by-team');
+    if(!container) return;
+    const teams = getDistinctTeams();
+    if(teams.length === 0){
+      container.innerHTML = '<div style="color:var(--ink-soft);font-size:12px;">Add people to the board to see open capacity.</div>';
+      return;
+    }
+    container.innerHTML = teams.map((t,i)=>`
+      <div style="font-size:12px;font-weight:700;margin:${i===0?10:16}px 0 6px;">${escapeHtml(t)}</div>
+      <div style="overflow:auto;" id="rb-overview-bench-wrap-${i}"></div>
+    `).join('');
+    teams.forEach((t,i)=> renderOverviewBenchGroup(t, `rb-overview-bench-wrap-${i}`));
   }
 
-  function renderOverviewBenchGroup(group, wrapId){
+  function renderOverviewBenchGroup(team, wrapId){
     const wrap = document.getElementById(wrapId);
     if(!wrap) return;
-    const people = peopleInGroup(group);
+    const people = peopleInTeam(team);
     if(people.length === 0){
-      wrap.innerHTML = '<div style="color:var(--ink-soft);font-size:12px;">No one in this group yet.</div>';
+      wrap.innerHTML = '<div style="color:var(--ink-soft);font-size:12px;">No one on this team yet.</div>';
       return;
     }
     const week = getWeeks()[0];
@@ -1003,7 +1099,7 @@
   function renderOverviewPerPerson(){
     const wrap = document.getElementById('rb-overview-person-wrap');
     if(!wrap) return;
-    if(state.people.length === 0){
+    if(state.people.filter(p=>!p.archived).length === 0){
       wrap.innerHTML = '<div style="color:var(--ink-soft);font-size:12px;">Add people to the board to see per-person utilization.</div>';
       return;
     }
@@ -1014,18 +1110,27 @@
     let thead = '<thead><tr><th>Person</th>' + weeks.map(w=>`<th>${fmtShort(new Date(w))}</th>`).join('') + '<th>Avg</th></tr></thead>';
 
     let rows = '';
-    state.people.forEach(person=>{
+    state.people.filter(p=>!p.archived).forEach(person=>{
       let row = `<tr><th>${escapeHtml(person.name)}<div style="font-weight:400;color:var(--ink-soft);font-size:10.5px;">${escapeHtml(person.role)}</div></th>`;
-      let pctSum = 0;
+      let pctSum = 0, countedWeeks = 0;
       weeks.forEach(w=>{
         const ext = committedHours(person.id, w);
         const cap = effectiveCapacity(person, w);
-        const pct = cap > 0 ? Math.round((ext/cap)*100) : (ext > 0 ? 999 : 0);
-        pctSum += pct;
-        const status = utilStatus(pct);
-        row += `<td style="background:${status.bg};color:${status.color};font-weight:700;">${pct}%</td>`;
+        if(cap > 0){
+          const pct = Math.round((ext/cap)*100);
+          pctSum += pct; countedWeeks++;
+          const status = utilStatus(pct);
+          row += `<td style="background:${status.bg};color:${status.color};font-weight:700;">${pct}%</td>`;
+        } else if(ext > 0){
+          const over = utilStatus(999);
+          row += `<td style="background:${over.bg};color:${over.color};font-weight:700;" title="No capacity this week (fully covered by PTO), but hours are logged">N/A</td>`;
+        } else {
+          const status = utilStatus(0);
+          pctSum += 0; countedWeeks++;
+          row += `<td style="background:${status.bg};color:${status.color};font-weight:700;">0%</td>`;
+        }
       });
-      const avg = Math.round(pctSum / weeks.length);
+      const avg = countedWeeks > 0 ? Math.round(pctSum / countedWeeks) : 0;
       const avgStatus = utilStatus(avg);
       row += `<td style="color:${avgStatus.color};font-weight:800;">${avg}%</td></tr>`;
       rows += row;
@@ -1091,13 +1196,16 @@
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           <span class="rb-swatch" style="background:${statusColor(project)}"></span>
           <span class="rb-status-badge" style="background:${statusColor(project)}22;color:${statusColor(project)};margin-left:0;">${escapeHtml(project.status || 'No status')}</span>
+          ${!projectHasAssignments(project.id) ? '<span class="rb-status-badge" style="background:var(--over-bg);color:var(--over);margin-left:0;">UNASSIGNED</span>':''}
           ${project.sample ? '<span class="rb-sample-tag">SAMPLE</span>':''}
         </div>
         <div style="display:flex;gap:6px;">
+          <button class="rb-btn ghost sm" id="rb-pv-shift">Shift dates</button>
           <button class="rb-btn ghost sm" id="rb-pv-add-phase">+ Add phase</button>
           <button class="rb-btn ghost sm" id="rb-pv-edit">Edit project</button>
         </div>
       </div>
+      ${!projectHasAssignments(project.id) ? `<div style="margin-top:10px;padding:9px 12px;background:var(--over-bg);color:var(--over);border-radius:8px;font-size:12px;font-weight:600;">No one is staffed on this project yet. Use "+ Add phase" above, or assign hours from the Board tab.</div>` : ''}
       <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">${projectRangeLabel(project)}${ownerName(project) ? ' &middot; Owner: '+escapeHtml(ownerName(project)) : ' &middot; No owner set'}</div>
       <div style="margin-top:6px;">${projectBudgetHtml(project)}</div>
       ${(()=>{
@@ -1120,6 +1228,30 @@
           ${rows}
         </div>`;
       })()}
+      ${(()=>{
+        const ms = project.milestones || {};
+        const set = MILESTONE_FIELDS.filter(m=>ms[m.key]);
+        if(set.length === 0) return '';
+        const today = isoDate(new Date());
+        const rows = set.map(m=>{
+          const d = ms[m.key];
+          let stateLabel, stateColor;
+          if(d < today){ stateLabel = 'Done'; stateColor = 'var(--ink-soft)'; }
+          else if(d === today){ stateLabel = 'Today'; stateColor = 'var(--jmt-green-dark)'; }
+          else { stateLabel = 'Upcoming'; stateColor = 'var(--under)'; }
+          return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);">
+            <div style="font-size:12.5px;font-weight:600;${d < today ? 'color:var(--ink-soft);text-decoration:line-through;text-decoration-color:var(--line);' : ''}">${escapeHtml(m.label)}</div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-size:11px;color:${stateColor};font-weight:700;">${stateLabel}</span>
+              <span style="font-size:12px;color:var(--ink-soft);white-space:nowrap;">${fmtShort(new Date(d))}</span>
+            </div>
+          </div>`;
+        }).join('');
+        return `<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
+          <div style="font-size:12px;font-weight:700;margin-bottom:4px;">Milestones</div>
+          ${rows}
+        </div>`;
+      })()}
       <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
         <div style="display:flex;align-items:center;justify-content:space-between;">
           <div style="font-size:12px;font-weight:700;">Notes</div>
@@ -1131,6 +1263,7 @@
     document.getElementById('rb-pv-notes').addEventListener('click', ()=> openProjectNotesModal(project.id));
     document.getElementById('rb-pv-edit').addEventListener('click', ()=> openProjectEditModal(project, ()=> renderProjectViewDetail()));
     document.getElementById('rb-pv-add-phase').addEventListener('click', ()=> openAddPhaseModal(project));
+    document.getElementById('rb-pv-shift').addEventListener('click', ()=> openShiftProjectModal(project));
 
     const weeks = getProjectWeeks(project.id);
     if(weeks.length === 0){
@@ -1213,21 +1346,25 @@
   function openPersonModal(personId){
     const editing = personId ? personById(personId) : null;
     const host = document.getElementById('rb-modal-host');
+    const roleSuggestions = getDistinctRoles();
+    const teamSuggestions = getDistinctTeams();
     host.innerHTML = `
       <div class="rb-overlay" id="rb-overlay">
         <div class="rb-modal">
           <h3>${editing ? 'Edit person' : 'Add person'}</h3>
-          <div class="rb-modal-sub">${editing ? 'Update their role or weekly capacity.' : 'Add someone to the board.'}</div>
+          <div class="rb-modal-sub">${editing ? 'Update their team, role, or weekly capacity.' : 'Add someone to the board.'}</div>
           <div class="rb-field"><label>Name</label><input id="rb-p-name" value="${editing ? escapeHtml(editing.name):''}" placeholder="e.g. Jordan Lee"/></div>
           <div class="rb-row2">
-            <div class="rb-field"><label>Role</label>
-              <select id="rb-p-role">
-                ${editing && !ROLE_OPTIONS.find(r=>r.value===editing.role) ? `<option value="${escapeHtml(editing.role)}" selected>${escapeHtml(editing.role)} (existing)</option>` : ''}
-                ${ROLE_OPTIONS.map(r=>`<option value="${r.value}" ${editing && editing.role===r.value ? 'selected':''}>${r.value}</option>`).join('')}
-              </select>
+            <div class="rb-field"><label>Team</label>
+              <input id="rb-p-team" list="rb-p-team-list" value="${editing ? escapeHtml(editing.team || DEFAULT_TEAM) : DEFAULT_TEAM}" placeholder="e.g. Data Services"/>
+              <datalist id="rb-p-team-list">${teamSuggestions.map(t=>`<option value="${escapeHtml(t)}">`).join('')}</datalist>
             </div>
-            <div class="rb-field"><label>Weekly capacity (hrs)</label><input id="rb-p-cap" type="number" min="0" step="1" value="${editing ? editing.capacity : 40}"/></div>
+            <div class="rb-field"><label>Role</label>
+              <input id="rb-p-role" list="rb-p-role-list" value="${editing ? escapeHtml(editing.role) : ''}" placeholder="e.g. Sr. Consultant"/>
+              <datalist id="rb-p-role-list">${roleSuggestions.map(r=>`<option value="${escapeHtml(r)}">`).join('')}</datalist>
+            </div>
           </div>
+          <div class="rb-field"><label>Weekly capacity (hrs)</label><input id="rb-p-cap" type="number" min="0" step="1" value="${editing ? editing.capacity : 40}"/></div>
           <div class="rb-modal-actions">
             <button class="rb-btn ghost" id="rb-p-cancel">Cancel</button>
             <button class="rb-btn primary" id="rb-p-save">${editing ? 'Save' : 'Add'}</button>
@@ -1238,15 +1375,16 @@
     document.getElementById('rb-overlay').addEventListener('click', (e)=>{ if(e.target.id==='rb-overlay') closeModal(); });
     document.getElementById('rb-p-save').addEventListener('click', ()=>{
       const name = document.getElementById('rb-p-name').value.trim();
-      const role = document.getElementById('rb-p-role').value || 'PM 1';
+      const team = document.getElementById('rb-p-team').value.trim() || DEFAULT_TEAM;
+      const role = document.getElementById('rb-p-role').value.trim() || 'Team member';
       const cap = Number(document.getElementById('rb-p-cap').value) || 0;
       if(!name) return;
       if(editing){
-        editing.name = name; editing.role = role; editing.capacity = cap;
+        editing.name = name; editing.role = role; editing.team = team; editing.capacity = cap;
         logActivity(`Edited person "${name}"`);
       } else {
-        state.people.push({id:uid(), name, role, capacity:cap});
-        logActivity(`Added person "${name}" (${role})`);
+        state.people.push({id:uid(), name, role, team, capacity:cap});
+        logActivity(`Added person "${name}" (${role}, ${team})`);
       }
       scheduleSave(); closeModal(); render();
     });
@@ -1261,7 +1399,7 @@
           <span style="display:flex;align-items:center;gap:8px;">
             <span class="rb-swatch" style="background:${statusColor(p)}"></span>
             <span>
-              <div>${escapeHtml(p.name)}<span class="rb-status-badge" style="background:${statusColor(p)}22;color:${statusColor(p)};">${escapeHtml(p.status || 'No status')}</span>${p.sample ? '<span class="rb-sample-tag">SAMPLE</span>':''}</div>
+              <div>${escapeHtml(p.name)}<span class="rb-status-badge" style="background:${statusColor(p)}22;color:${statusColor(p)};">${escapeHtml(p.status || 'No status')}</span>${!projectHasAssignments(p.id) ? '<span class="rb-status-badge" style="background:var(--over-bg);color:var(--over);">UNASSIGNED</span>':''}${p.sample ? '<span class="rb-sample-tag">SAMPLE</span>':''}</div>
               <div style="font-size:10.5px;color:var(--ink-soft);margin-top:1px;">${projectRangeLabel(p)}${ownerName(p) ? ' &middot; Owner: '+escapeHtml(ownerName(p)) : ''}</div>
               ${projectBudgetHtml(p)}
             </span>
@@ -1285,14 +1423,24 @@
           </div>
           <div class="rb-field"><label>Contracted hours <span style="font-weight:400;text-transform:none;">(optional)</span></label><input id="rb-new-proj-contracted" type="number" min="0" step="1" placeholder="e.g. 400"/></div>
           <div class="rb-field"><label>Status</label>
-            <select id="rb-new-proj-status">${STATUS_OPTIONS.map(s=>`<option value="${s.name}">${s.name}</option>`).join('')}</select>
+            <select id="rb-new-proj-status">${statusOptions().map(s=>`<option value="${s.name}">${s.name}</option>`).join('')}</select>
           </div>
           <div class="rb-field"><label>Owner <span style="font-weight:400;text-transform:none;">(optional)</span></label>
             <select id="rb-new-proj-owner">
               <option value="">No owner</option>
-              ${state.people.map(p=>`<option value="${p.id}">${escapeHtml(p.name)} \u2014 ${escapeHtml(p.role)}</option>`).join('')}
+              ${state.people.filter(p=>!p.archived).map(p=>`<option value="${p.id}">${escapeHtml(p.name)} \u2014 ${escapeHtml(p.role)}</option>`).join('')}
             </select>
           </div>
+          <div style="font-size:11px;font-weight:700;color:var(--ink-soft);margin-bottom:4px;margin-top:6px;">Milestones <span style="font-weight:400;">(all optional)</span></div>
+          <div class="rb-row2">
+            <div class="rb-field"><label>Kickoff</label><input id="rb-new-proj-m-kickoff" type="date"/></div>
+            <div class="rb-field"><label>Design End</label><input id="rb-new-proj-m-designEnd" type="date"/></div>
+          </div>
+          <div class="rb-row2">
+            <div class="rb-field"><label>Build</label><input id="rb-new-proj-m-build" type="date"/></div>
+            <div class="rb-field"><label>Go-Live</label><input id="rb-new-proj-m-goLive" type="date"/></div>
+          </div>
+          <div class="rb-field"><label>Transfer to Support</label><input id="rb-new-proj-m-transferSupport" type="date"/></div>
           <div class="rb-modal-actions" style="justify-content:space-between;">
             <button class="rb-btn ghost sm" id="rb-clear-sample">Clear sample data</button>
             <div style="display:flex;gap:8px;">
@@ -1313,7 +1461,12 @@
       const contractedHours = document.getElementById('rb-new-proj-contracted').value ? Number(document.getElementById('rb-new-proj-contracted').value) : null;
       const ownerId = document.getElementById('rb-new-proj-owner').value || null;
       if(!name) return;
-      state.projects.push({id:uid(), name, status, startDate, endDate, contractedHours, ownerId});
+      const milestones = {};
+      MILESTONE_FIELDS.forEach(m=>{
+        const v = document.getElementById('rb-new-proj-m-'+m.key).value;
+        if(v) milestones[m.key] = v;
+      });
+      state.projects.push({id:uid(), name, status, startDate, endDate, contractedHours, ownerId, milestones});
       logActivity(`Added project "${name}" (${status})`);
       scheduleSave(); render(); openProjectsModal();
     });
@@ -1352,14 +1505,24 @@
           </div>
           <div class="rb-field"><label>Contracted hours <span style="font-weight:400;text-transform:none;">(optional)</span></label><input id="rb-edit-proj-contracted" type="number" min="0" step="1" value="${project.contractedHours !== null && project.contractedHours !== undefined ? project.contractedHours : ''}" placeholder="e.g. 400"/></div>
           <div class="rb-field"><label>Status</label>
-            <select id="rb-edit-proj-status">${STATUS_OPTIONS.map(s=>`<option value="${s.name}" ${s.name===project.status?'selected':''}>${s.name}</option>`).join('')}</select>
+            <select id="rb-edit-proj-status">${statusOptions().map(s=>`<option value="${s.name}" ${s.name===project.status?'selected':''}>${s.name}</option>`).join('')}</select>
           </div>
           <div class="rb-field"><label>Owner <span style="font-weight:400;text-transform:none;">(optional)</span></label>
             <select id="rb-edit-proj-owner">
               <option value="">No owner</option>
-              ${state.people.map(p=>`<option value="${p.id}" ${p.id===project.ownerId?'selected':''}>${escapeHtml(p.name)} \u2014 ${escapeHtml(p.role)}</option>`).join('')}
+              ${state.people.filter(p=>!p.archived || p.id===project.ownerId).map(p=>`<option value="${p.id}" ${p.id===project.ownerId?'selected':''}>${escapeHtml(p.name)}${p.archived ? ' (archived)':''} \u2014 ${escapeHtml(p.role)}</option>`).join('')}
             </select>
           </div>
+          <div style="font-size:11px;font-weight:700;color:var(--ink-soft);margin-bottom:4px;margin-top:6px;">Milestones <span style="font-weight:400;">(all optional)</span></div>
+          <div class="rb-row2">
+            <div class="rb-field"><label>Kickoff</label><input id="rb-edit-proj-m-kickoff" type="date" value="${(project.milestones && project.milestones.kickoff) || ''}"/></div>
+            <div class="rb-field"><label>Design End</label><input id="rb-edit-proj-m-designEnd" type="date" value="${(project.milestones && project.milestones.designEnd) || ''}"/></div>
+          </div>
+          <div class="rb-row2">
+            <div class="rb-field"><label>Build</label><input id="rb-edit-proj-m-build" type="date" value="${(project.milestones && project.milestones.build) || ''}"/></div>
+            <div class="rb-field"><label>Go-Live</label><input id="rb-edit-proj-m-goLive" type="date" value="${(project.milestones && project.milestones.goLive) || ''}"/></div>
+          </div>
+          <div class="rb-field"><label>Transfer to Support</label><input id="rb-edit-proj-m-transferSupport" type="date" value="${(project.milestones && project.milestones.transferSupport) || ''}"/></div>
           <div class="rb-modal-actions">
             <button class="rb-btn ghost" id="rb-edit-proj-cancel">Cancel</button>
             <button class="rb-btn primary" id="rb-edit-proj-save">Save</button>
@@ -1378,6 +1541,12 @@
       project.contractedHours = ch ? Number(ch) : null;
       project.status = document.getElementById('rb-edit-proj-status').value;
       project.ownerId = document.getElementById('rb-edit-proj-owner').value || null;
+      const milestones = {};
+      MILESTONE_FIELDS.forEach(m=>{
+        const v = document.getElementById('rb-edit-proj-m-'+m.key).value;
+        if(v) milestones[m.key] = v;
+      });
+      project.milestones = milestones;
       logActivity(`Edited project "${project.name}"`);
       scheduleSave(); render();
       closeModal(); done();
@@ -1478,7 +1647,7 @@
     const d = new Date(week);
     host.innerHTML = `
       <div class="rb-overlay" id="rb-overlay">
-        <div class="rb-modal">
+        <div class="rb-modal" style="max-width:560px;">
           <h3>${escapeHtml(person.name)}</h3>
           <div class="rb-modal-sub">Week of ${fmtShort(d)} &middot; capacity ${person.capacity}h</div>
           <div class="rb-field"><label>Time off this week (hrs)</label><input id="rb-assign-pto" type="number" min="0" step="1" value="${currentPto || ''}" placeholder="0"/></div>
@@ -1527,8 +1696,89 @@
     });
   }
 
+  function openShiftProjectModal(project){
+    const personIds = Array.from(new Set(state.assignments.filter(a=>a.projectId===project.id).map(a=>a.personId)));
+    if(personIds.length === 0){
+      showAlert('No one has hours on this project yet, so there\'s nothing to shift.');
+      return;
+    }
+    const people = personIds.map(id=>personById(id)).filter(Boolean);
+    const hasMilestones = project.milestones && Object.values(project.milestones).some(v=>v);
+    const host = document.getElementById('rb-modal-host');
+    host.innerHTML = `
+      <div class="rb-overlay" id="rb-overlay">
+        <div class="rb-modal">
+          <h3>Shift dates</h3>
+          <div class="rb-modal-sub">${escapeHtml(project.name)} &mdash; move assigned weeks forward or back, keeping the same hours pattern.</div>
+          <div class="rb-field"><label>Who</label>
+            <select id="rb-shift-person">
+              <option value="">Everyone on this project</option>
+              ${people.map(p=>`<option value="${p.id}">${escapeHtml(p.name)} \u2014 ${escapeHtml(p.role)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="rb-field"><label>Weeks to shift <span style="font-weight:400;text-transform:none;">(positive = later, negative = earlier)</span></label><input id="rb-shift-weeks" type="number" step="1" value="1"/></div>
+          ${hasMilestones ? `<div class="rb-field" style="display:flex;align-items:center;gap:7px;">
+            <input type="checkbox" id="rb-shift-milestones" style="width:auto;" checked/>
+            <label for="rb-shift-milestones" style="margin:0;text-transform:none;font-size:12.5px;font-weight:600;color:var(--ink);">Also shift this project's milestone dates by the same amount</label>
+          </div>` : ''}
+          <div class="rb-modal-actions">
+            <button class="rb-btn ghost" id="rb-shift-cancel">Cancel</button>
+            <button class="rb-btn primary" id="rb-shift-save">Shift</button>
+          </div>
+        </div>
+      </div>`;
+    document.getElementById('rb-shift-cancel').addEventListener('click', closeModal);
+    document.getElementById('rb-overlay').addEventListener('click', (e)=>{ if(e.target.id==='rb-overlay') closeModal(); });
+
+    document.getElementById('rb-shift-save').addEventListener('click', ()=>{
+      const personFilter = document.getElementById('rb-shift-person').value;
+      const weeksToShift = Number(document.getElementById('rb-shift-weeks').value);
+      if(!weeksToShift){
+        showAlert('Enter a non-zero number of weeks.');
+        return;
+      }
+      const matched = state.assignments.filter(a=>a.projectId===project.id && (personFilter==='' || a.personId===personFilter));
+      if(matched.length === 0){
+        showAlert('Nothing to shift for that selection.');
+        return;
+      }
+      const moved = matched.map(a=>{
+        const nd = new Date(a.weekStart);
+        nd.setDate(nd.getDate() + weeksToShift*7);
+        return Object.assign({}, a, {weekStart: isoDate(mondayOf(nd))});
+      });
+      const matchedIds = new Set(matched.map(a=>a.id));
+      state.assignments = state.assignments.filter(a=>!matchedIds.has(a.id));
+      state.assignments.push(...moved);
+
+      const shiftMilestones = hasMilestones && document.getElementById('rb-shift-milestones') && document.getElementById('rb-shift-milestones').checked;
+      if(shiftMilestones){
+        const ms = project.milestones || {};
+        Object.keys(ms).forEach(key=>{
+          if(!ms[key]) return;
+          const nd = new Date(ms[key]);
+          nd.setDate(nd.getDate() + weeksToShift*7);
+          ms[key] = isoDate(nd);
+        });
+      }
+      if(project.startDate){
+        const nd = new Date(project.startDate); nd.setDate(nd.getDate() + weeksToShift*7);
+        project.startDate = isoDate(nd);
+      }
+      if(project.endDate){
+        const nd = new Date(project.endDate); nd.setDate(nd.getDate() + weeksToShift*7);
+        project.endDate = isoDate(nd);
+      }
+
+      const personLabel = personFilter ? (personById(personFilter) ? personById(personFilter).name : 'someone') : 'everyone';
+      logActivity(`Shifted "${project.name}" (${personLabel}) by ${weeksToShift > 0 ? '+' : ''}${weeksToShift} week${Math.abs(weeksToShift)>1?'s':''} (${matched.length} assignments moved)`);
+      scheduleSave(); render(); closeModal();
+      renderProjectViewDetail();
+    });
+  }
+
   function openAddPhaseModal(project){
-    if(state.people.length === 0){
+    if(state.people.filter(p=>!p.archived).length === 0){
       showAlert('Add people to the board first.');
       return;
     }
@@ -1536,7 +1786,7 @@
     let segments = [{weeks:4, hours:4}];
 
     function personOptionsHtml(){
-      return '<option value="">Choose person</option>' + state.people.map(p=>`<option value="${p.id}">${escapeHtml(p.name)} \u2014 ${escapeHtml(p.role)}</option>`).join('');
+      return '<option value="">Choose person</option>' + state.people.filter(p=>!p.archived).map(p=>`<option value="${p.id}">${escapeHtml(p.name)} \u2014 ${escapeHtml(p.role)}</option>`).join('');
     }
     function segmentRowHtml(seg){
       return `<div class="rb-assign-row">
@@ -1648,7 +1898,7 @@
   }
 
   function openPhasedProjectModal(){
-    if(state.people.length === 0){
+    if(state.people.filter(p=>!p.archived).length === 0){
       showAlert('Add people to the board first.');
       return;
     }
@@ -1660,7 +1910,7 @@
     ];
 
     function personOptionsHtml(selectedId){
-      return '<option value="">Choose person</option>' + state.people.map(p=>`<option value="${p.id}" ${p.id===selectedId?'selected':''}>${escapeHtml(p.name)} \u2014 ${escapeHtml(p.role)}</option>`).join('');
+      return '<option value="">Choose person</option>' + state.people.filter(p=>!p.archived).map(p=>`<option value="${p.id}" ${p.id===selectedId?'selected':''}>${escapeHtml(p.name)} \u2014 ${escapeHtml(p.role)}</option>`).join('');
     }
 
     function segmentRowHtml(seg){
@@ -1771,14 +2021,14 @@
           <div class="rb-row2">
             <div class="rb-field"><label>Go-live date</label><input id="rb-phase-golive" type="date"/></div>
             <div class="rb-field"><label>Status</label>
-              <select id="rb-phase-status">${STATUS_OPTIONS.map(s=>`<option value="${s.name}" ${s.name==='In Design'?'selected':''}>${s.name}</option>`).join('')}</select>
+              <select id="rb-phase-status">${statusOptions().map((s,i)=>`<option value="${s.name}" ${(s.name==='In Design') || (i===0 && !statusOptions().some(x=>x.name==='In Design')) ? 'selected':''}>${s.name}</option>`).join('')}</select>
             </div>
           </div>
           <div class="rb-row2">
             <div class="rb-field"><label>Owner <span style="font-weight:400;text-transform:none;">(optional)</span></label>
               <select id="rb-phase-owner">
                 <option value="">No owner</option>
-                ${state.people.map(p=>`<option value="${p.id}">${escapeHtml(p.name)} \u2014 ${escapeHtml(p.role)}</option>`).join('')}
+                ${state.people.filter(p=>!p.archived).map(p=>`<option value="${p.id}">${escapeHtml(p.name)} \u2014 ${escapeHtml(p.role)}</option>`).join('')}
               </select>
             </div>
             <div class="rb-field"><label>Contracted hours <span style="font-weight:400;text-transform:none;">(optional)</span></label><input id="rb-phase-contracted" type="number" min="0" step="1" placeholder="e.g. 400"/></div>
@@ -1810,7 +2060,7 @@
       const goLive = document.getElementById('rb-phase-golive').value || null;
 
       let earliestStart = null, latestEnd = null;
-      const project = {id:uid(), name, status, startDate:null, endDate:goLive, contractedHours, ownerId, notes:''};
+      const project = {id:uid(), name, status, startDate:null, endDate:goLive, contractedHours, ownerId, notes:'', milestones:{}};
       state.projects.push(project);
 
       let assignmentsWritten = 0;
@@ -1847,7 +2097,7 @@
       showAlert('Add a project first (use the "Projects" button) before bulk assigning.');
       return;
     }
-    if(state.people.length === 0){
+    if(state.people.filter(p=>!p.archived).length === 0){
       showAlert('Add people to the board first.');
       return;
     }
@@ -1876,7 +2126,7 @@
           </div>
           <div class="rb-field"><label>People</label>
             <div class="rb-list-manage" style="max-height:180px;">
-              ${state.people.map(p=>`
+              ${state.people.filter(p=>!p.archived).map(p=>`
                 <label class="row" style="cursor:pointer;">
                   <span>${escapeHtml(p.name)} <span style="color:var(--ink-soft);font-weight:400;">&mdash; ${escapeHtml(p.role)}</span></span>
                   <input type="checkbox" class="rb-bulk-person" value="${p.id}" style="width:auto;"/>
@@ -1929,7 +2179,7 @@
     const weeks = Object.keys(totals);
     // fully rebuild holiday-tagged PTO from the current holiday list, so edits/removals are reflected correctly
     state.pto = state.pto.filter(p=>!p.holiday);
-    state.people.forEach(person=>{
+    state.people.filter(p=>!p.archived).forEach(person=>{
       weeks.forEach(week=>{
         state.pto.push({id:uid(), personId:person.id, weekStart:week, hours:totals[week], holiday:true});
       });
@@ -1944,6 +2194,141 @@
     if(isNaN(d.getTime())) return null;
     const hoursVal = parts[2] !== undefined ? Number(parts[2]) : 8;
     return {label, date: isoDate(d), hours: isNaN(hoursVal) ? 8 : hoursVal};
+  }
+
+  function openArchivedModal(){
+    const host = document.getElementById('rb-modal-host');
+    function listHtml(){
+      const archived = state.people.filter(p=>p.archived);
+      if(archived.length === 0) return '<div style="color:var(--ink-soft);font-size:12px;padding:6px 0;">No one is archived right now.</div>';
+      return archived.map(p=>`
+        <div class="row">
+          <span>
+            <div>${escapeHtml(p.name)}</div>
+            <div style="font-size:10.5px;color:var(--ink-soft);margin-top:1px;">${escapeHtml(p.role)} &middot; ${escapeHtml(p.team || DEFAULT_TEAM)}</div>
+          </span>
+          <span style="display:flex;gap:4px;">
+            <button class="rb-icon-btn" data-restore-person="${p.id}">Restore</button>
+            <button class="rb-icon-btn" data-purge-person="${p.id}">Remove permanently</button>
+          </span>
+        </div>`).join('');
+    }
+    host.innerHTML = `
+      <div class="rb-overlay" id="rb-overlay">
+        <div class="rb-modal">
+          <h3>Archived people</h3>
+          <div class="rb-modal-sub">Archived people are hidden from the Board and utilization views, but their history (past assignments, activity log, project rosters) is kept.</div>
+          <div class="rb-list-manage" id="rb-archived-list">${listHtml()}</div>
+          <div class="rb-modal-actions">
+            <button class="rb-btn ghost" id="rb-archived-close">Close</button>
+          </div>
+        </div>
+      </div>`;
+    document.getElementById('rb-archived-close').addEventListener('click', closeModal);
+    document.getElementById('rb-overlay').addEventListener('click', (e)=>{ if(e.target.id==='rb-overlay') closeModal(); });
+    host.querySelectorAll('[data-restore-person]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const id = btn.dataset.restorePerson;
+        const person = personById(id);
+        if(!person) return;
+        person.archived = false;
+        logActivity(`Restored person "${person.name}"`);
+        scheduleSave(); render(); openArchivedModal();
+      });
+    });
+    host.querySelectorAll('[data-purge-person]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const id = btn.dataset.purgePerson;
+        const person = personById(id);
+        if(!person) return;
+        showConfirm(`Permanently remove ${person.name} and all their assignments? This can't be undone.`, ()=>{
+          state.people = state.people.filter(p=>p.id!==id);
+          state.assignments = state.assignments.filter(a=>a.personId!==id);
+          state.pto = state.pto.filter(p=>p.personId!==id);
+          logActivity(`Permanently removed archived person "${person.name}"`);
+          scheduleSave(); render(); openArchivedModal();
+        }, ()=> openArchivedModal());
+      });
+    });
+  }
+
+  function openStatusesModal(){
+    const host = document.getElementById('rb-modal-host');
+    function usageCount(name){
+      return state.projects.filter(p=>p.status===name).length;
+    }
+    function listHtml(){
+      if(state.statusOptions.length === 0) return '<div style="color:var(--ink-soft);font-size:12px;padding:6px 0;">No statuses defined.</div>';
+      return state.statusOptions.map(s=>{
+        const uses = usageCount(s.name);
+        return `<div class="row">
+          <span style="display:flex;align-items:center;gap:8px;">
+            <span class="rb-swatch" style="background:${s.color}"></span>
+            <span>
+              <div>${escapeHtml(s.name)}${s.internal ? '<span class="rb-internal-tag">EXCLUDED FROM UTILIZATION</span>':''}</div>
+              <div style="font-size:10.5px;color:var(--ink-soft);margin-top:1px;">${uses} project${uses===1?'':'s'} using this</div>
+            </span>
+          </span>
+          <button class="rb-icon-btn" data-del-status="${s.id}">Remove</button>
+        </div>`;
+      }).join('');
+    }
+    host.innerHTML = `
+      <div class="rb-overlay" id="rb-overlay">
+        <div class="rb-modal">
+          <h3>Statuses</h3>
+          <div class="rb-modal-sub">Define the project lifecycle stages your team uses. Each team can use whichever statuses fit their work &mdash; this list is shared across the whole board.</div>
+          <div class="rb-list-manage" id="rb-status-list">${listHtml()}</div>
+          <div class="rb-row2">
+            <div class="rb-field" style="flex:2"><label>New status name</label><input id="rb-new-status-name" placeholder="e.g. QA / Testing"/></div>
+            <div class="rb-field" style="flex:1"><label>Color</label>
+              <select id="rb-new-status-color">${STATUS_COLOR_CHOICES.map((c,i)=>`<option value="${c}" style="background:${c}">Color ${i+1}</option>`).join('')}</select>
+            </div>
+          </div>
+          <div class="rb-field" style="display:flex;align-items:center;gap:7px;">
+            <input type="checkbox" id="rb-new-status-internal" style="width:auto;"/>
+            <label for="rb-new-status-internal" style="margin:0;text-transform:none;font-size:12.5px;font-weight:600;color:var(--ink);">Excluded from utilization (like "Internal" &mdash; meetings, admin, non-billable)</label>
+          </div>
+          <div class="rb-modal-actions" style="justify-content:space-between;">
+            <div></div>
+            <div style="display:flex;gap:8px;">
+              <button class="rb-btn ghost" id="rb-status-close">Close</button>
+              <button class="rb-btn primary" id="rb-status-add">Add status</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    document.getElementById('rb-status-close').addEventListener('click', closeModal);
+    document.getElementById('rb-overlay').addEventListener('click', (e)=>{ if(e.target.id==='rb-overlay') closeModal(); });
+    document.getElementById('rb-status-add').addEventListener('click', ()=>{
+      const name = document.getElementById('rb-new-status-name').value.trim();
+      const color = document.getElementById('rb-new-status-color').value;
+      const internal = document.getElementById('rb-new-status-internal').checked;
+      if(!name) return;
+      if(state.statusOptions.some(s=>s.name.toLowerCase()===name.toLowerCase())){
+        showAlert('A status with that name already exists.');
+        return;
+      }
+      state.statusOptions.push({id:uid(), name, color, internal});
+      logActivity(`Added status "${name}"`);
+      scheduleSave(); render(); openStatusesModal();
+    });
+    host.querySelectorAll('[data-del-status]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const id = btn.dataset.delStatus;
+        const s = state.statusOptions.find(x=>x.id===id);
+        if(!s) return;
+        const uses = usageCount(s.name);
+        const msg = uses > 0
+          ? `Remove "${s.name}"? ${uses} project${uses===1?' is':'s are'} currently using it \u2014 they'll keep the label but it'll show in a neutral gray until reassigned.`
+          : `Remove "${s.name}"?`;
+        showConfirm(msg, ()=>{
+          state.statusOptions = state.statusOptions.filter(x=>x.id!==id);
+          logActivity(`Removed status "${s.name}"`);
+          scheduleSave(); render(); openStatusesModal();
+        }, ()=> openStatusesModal());
+      });
+    });
   }
 
   function openHolidaysModal(){
@@ -2077,7 +2462,9 @@
   document.getElementById('rb-prev').addEventListener('click', ()=>{ weekOffset--; render(); });
   document.getElementById('rb-next').addEventListener('click', ()=>{ weekOffset++; render(); });
   document.getElementById('rb-add-person').addEventListener('click', ()=> openPersonModal());
+  document.getElementById('rb-view-archived').addEventListener('click', ()=> openArchivedModal());
   document.getElementById('rb-manage-projects').addEventListener('click', ()=> openProjectsModal());
+  document.getElementById('rb-manage-statuses').addEventListener('click', ()=> openStatusesModal());
   document.getElementById('rb-tab-board').addEventListener('click', ()=> switchTab('board'));
   document.getElementById('rb-tab-overview').addEventListener('click', ()=> switchTab('overview'));
   document.getElementById('rb-tab-project').addEventListener('click', ()=> switchTab('project'));
@@ -2093,6 +2480,10 @@
   document.getElementById('rb-theme-toggle').addEventListener('click', ()=> toggleTheme());
   document.getElementById('rb-filter').addEventListener('input', (e)=>{
     filterText = e.target.value;
+    renderGrid();
+  });
+  document.getElementById('rb-team-filter').addEventListener('change', (e)=>{
+    teamFilter = e.target.value;
     renderGrid();
   });
   document.getElementById('rb-kpi-year').addEventListener('change', (e)=>{
