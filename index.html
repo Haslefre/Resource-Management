@@ -367,13 +367,25 @@
 
   <div id="rb-page-overview" style="display:none;">
     <div class="rb-section">
+      <h2>Needs attention</h2>
+      <div class="rb-section-sub">Over-capacity weeks, unstaffed projects with a milestone coming up, and milestones in the next 7 days.</div>
+      <div id="rb-needs-attention"></div>
+    </div>
+    <div class="rb-section">
       <h2>Parking lot <span style="font-weight:400;color:var(--ink-soft);font-size:12px;">(not yet staffed)</span></h2>
       <div class="rb-section-sub">Sold or upcoming projects with no one assigned yet &mdash; nothing here counts toward anyone's utilization.</div>
       <div id="rb-parking-lot"></div>
     </div>
     <div class="rb-section">
-      <h2>Weekly utilization</h2>
-      <div class="rb-section-sub">Committed hours vs. total team capacity (after PTO), grouped by team. Use the &larr; / &rarr; on the Board tab to change weeks.</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+        <h2 style="margin:0;">Weekly utilization</h2>
+        <select id="rb-util-period" style="font-family:inherit;font-size:12px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);">
+          <option value="weekly" selected>6-week view</option>
+          <option value="monthly">Monthly rollup</option>
+          <option value="quarterly">Quarterly rollup</option>
+        </select>
+      </div>
+      <div class="rb-section-sub" id="rb-util-period-sub">Committed hours vs. total team capacity (after PTO), grouped by team. Use the &larr; / &rarr; on the Board tab to change weeks.</div>
       <div id="rb-overview-util-by-team"></div>
     </div>
     <div class="rb-section">
@@ -430,6 +442,14 @@
       <div class="rb-section-sub">A running record of changes made in this browser &mdash; people, projects, assignments, notes. Saved with the rest of your data, capped to the most recent 200 entries. This only sees edits made from this browser; it isn't a shared, multi-user audit trail.</div>
       <div style="max-height:520px;overflow:auto;" id="rb-overview-audit-wrap"></div>
     </div>
+    <div class="rb-section">
+      <h2 style="color:var(--over);">Danger zone</h2>
+      <div class="rb-section-sub">Both actions require typing a confirmation phrase and can't be undone.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="rb-btn ghost" id="rb-restore-last-save" style="color:var(--over);border-color:var(--over);">Restore to Last Save</button>
+        <button class="rb-btn ghost" id="rb-reset-sample" style="color:var(--over);border-color:var(--over);">Reset to Sample Data</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -484,6 +504,15 @@
   }
   function peopleInTeam(team){
     return state.people.filter(p=> !p.archived && (p.team || DEFAULT_TEAM) === team);
+  }
+  function inferCategory(role){
+    return /\b(pm|coordinator|project manager)\b/i.test(role || '') ? 'pm' : 'consultant';
+  }
+  function pmCoordinatorPeople(){
+    return state.people.filter(p=> !p.archived && (p.category || inferCategory(p.role)) === 'pm');
+  }
+  function consultantPeopleInTeam(team){
+    return peopleInTeam(team).filter(p=> (p.category || inferCategory(p.role)) !== 'pm');
   }
 
   let state = { people: [], projects: [], assignments: [], pto: [], auditLog: [], holidays: [], statusOptions: DEFAULT_STATUS_OPTIONS.map(s=>Object.assign({},s)), settings: { annualTarget: 1450 } };
@@ -559,6 +588,7 @@
           state.statusOptions = DEFAULT_STATUS_OPTIONS.map(s=>Object.assign({},s));
         }
         state.people.forEach(p=>{ if(p.archived === undefined) p.archived = false; });
+        state.people.forEach(p=>{ if(!p.category) p.category = inferCategory(p.role); });
         state.projects.forEach(p=>{
           if(!p.status){
             p.status = p.internal ? 'Internal' : 'Sold - Awaiting Kickoff';
@@ -572,30 +602,80 @@
   }
 
   function seedSample(){
-    const pmId = uid(), pcId = uid(), c1 = uid(), c2 = uid();
-    const p1 = uid(), p2 = uid();
+    const pm2 = uid(), coord = uid(), sr = uid(), jr = uid(), sup = uid();
     state.people = [
-      {id:pmId, name:'Sample PM', role:'PM 1', team:DEFAULT_TEAM, capacity:40, sample:true},
-      {id:pcId, name:'Sample Coordinator', role:'Coordinator', team:DEFAULT_TEAM, capacity:40, sample:true},
-      {id:c1, name:'Sample Consultant A', role:'Sr. Consultant', team:DEFAULT_TEAM, capacity:40, sample:true},
-      {id:c2, name:'Sample Consultant B', role:'Jr. Consultant', team:DEFAULT_TEAM, capacity:32, sample:true},
+      {id:pm2, name:'Morgan Ellis', role:'PM 2', team:DEFAULT_TEAM, category:'pm', capacity:40, sample:true},
+      {id:coord, name:'Priya Shah', role:'Coordinator', team:DEFAULT_TEAM, category:'pm', capacity:40, sample:true},
+      {id:sr, name:'Diego Ramirez', role:'Sr. Consultant', team:DEFAULT_TEAM, category:'consultant', capacity:40, sample:true},
+      {id:jr, name:'Casey Nguyen', role:'Jr. Consultant', team:DEFAULT_TEAM, category:'consultant', capacity:40, sample:true},
+      {id:sup, name:'Jordan Blake', role:'Support', team:DEFAULT_TEAM, category:'consultant', capacity:32, sample:true},
     ];
-    const weeksForSample = getWeeks();
-    const rangeStart = weeksForSample[0];
-    const rangeEndDate = new Date(weeksForSample[weeksForSample.length-1]); rangeEndDate.setDate(rangeEndDate.getDate()+6);
+
+    const thisMonday = mondayOf(new Date());
+    function wk(offset){ const d = new Date(thisMonday); d.setDate(d.getDate()+offset*7); return isoDate(d); }
+
+    const designStart = wk(-3), designEnd = wk(3), goLive = wk(6), transferEnd = wk(10);
+    const p1 = uid();
     state.projects = [
-      {id:p1, name:'Sample Client — Implementation', status:'In Design', sample:true, startDate:rangeStart, endDate:isoDate(rangeEndDate), contractedHours:400, ownerId:pmId},
-      {id:p2, name:'Sample Client — Support Retainer', status:'Post Go-Live', sample:true, startDate:null, endDate:null},
-      {id:uid(), name:'Internal — Team Meetings', status:'Internal', sample:true, startDate:null, endDate:null},
+      {id:p1, name:'Riverside Health \u2014 Implementation', status:'In Training', sample:true,
+       startDate:designStart, endDate:transferEnd, contractedHours:300, ownerId:pm2,
+       notes:'Standard 3-phase build (Design / Training / Hypercare). Watch training capacity in the weeks leading up to go-live.',
+       milestones:{kickoff:designStart, designEnd:designEnd, build:designEnd, goLive:goLive, transferSupport:transferEnd}},
+      {id:uid(), name:'Lakeside Nonprofit \u2014 Support Retainer', status:'Post Go-Live', sample:true, startDate:null, endDate:null, ownerId:coord},
+      {id:uid(), name:'Brightpath Foundation \u2014 CAM Projects', status:'CAM Projects', sample:true, startDate:null, endDate:null, contractedHours:40},
+      {id:uid(), name:'Internal \u2014 Team Meetings', status:'Internal', sample:true, startDate:null, endDate:null},
+      {id:uid(), name:'Summit Partners \u2014 Future Engagement', status:'Future Ops', sample:true, startDate:null, endDate:null, ownerId:pm2, notes:'Verbal commitment from client \u2014 SOW not signed yet.'},
+      {id:uid(), name:'Cedar Grove Co-op \u2014 Kickoff Pending', status:'Sold - Awaiting Kickoff', sample:true, startDate:null, endDate:null, ownerId:coord, milestones:{kickoff:wk(8)}},
     ];
-    const weeks = getWeeks();
-    state.assignments = [
-      {id:uid(), personId:pmId, projectId:p1, weekStart:weeks[0], hours:20, sample:true},
-      {id:uid(), personId:pmId, projectId:p2, weekStart:weeks[0], hours:10, sample:true},
-      {id:uid(), personId:c1, projectId:p1, weekStart:weeks[0], hours:32, sample:true},
-      {id:uid(), personId:c1, projectId:p1, weekStart:weeks[1], hours:40, sample:true},
-      {id:uid(), personId:c2, projectId:p2, weekStart:weeks[0], hours:36, sample:true},
-    ];
+    const p2 = state.projects[1].id, p3 = state.projects[2].id, p4 = state.projects[3].id;
+
+    state.assignments = [];
+    for(let i=0;i<6;i++) state.assignments.push({id:uid(), personId:sr, projectId:p1, weekStart:wk(-3+i), hours:6, tentative:false, phase:'Design', sample:true});
+    for(let i=0;i<3;i++) state.assignments.push({id:uid(), personId:jr, projectId:p1, weekStart:wk(2+i), hours:4, tentative:false, phase:'Training', sample:true});
+    for(let i=0;i<4;i++) state.assignments.push({id:uid(), personId:sup, projectId:p1, weekStart:wk(6+i), hours:3, tentative:false, phase:'Hypercare', sample:true});
+    for(let i=-2;i<=7;i++) state.assignments.push({id:uid(), personId:sup, projectId:p2, weekStart:wk(i), hours:5, sample:true});
+    [0,1,3].forEach(i=> state.assignments.push({id:uid(), personId:sr, projectId:p3, weekStart:wk(i), hours:3, sample:true}));
+    for(let i=-2;i<=3;i++){
+      state.assignments.push({id:uid(), personId:pm2, projectId:p4, weekStart:wk(i), hours:1, sample:true});
+      state.assignments.push({id:uid(), personId:coord, projectId:p4, weekStart:wk(i), hours:1, sample:true});
+    }
+  }
+
+  function resetToSampleData(){
+    showTypedConfirm('Reset the entire board to sample data? This permanently deletes everything currently on the board \u2014 people, projects, assignments, PTO, holidays, and statuses \u2014 and replaces it with a fresh demo dataset. This can\'t be undone.', ()=>{
+      state = { people: [], projects: [], assignments: [], pto: [], auditLog: [], holidays: [], statusOptions: DEFAULT_STATUS_OPTIONS.map(s=>Object.assign({},s)), settings: { annualTarget: 1450 } };
+      seedSample();
+      logActivity('Reset entire board to sample data');
+      scheduleSave(); render();
+    });
+  }
+
+  async function restoreToLastSave(){
+    showTypedConfirm('Restore to the last saved version? Any changes made since the last autosave will be discarded. This can\'t be undone.', async ()=>{
+      try{
+        const res = await window.storage.get(STORAGE_KEY, false);
+        if(res && res.value){
+          state = JSON.parse(res.value);
+          if(!state.settings) state.settings = { annualTarget: 1450 };
+          if(!state.pto) state.pto = [];
+          if(!state.auditLog) state.auditLog = [];
+          if(!state.holidays) state.holidays = [];
+          if(state.projects) state.projects.forEach(p=>{ if(!p.milestones) p.milestones = {}; });
+          if(state.people) state.people.forEach(p=>{ if(!p.team) p.team = DEFAULT_TEAM; });
+          if(!state.statusOptions || state.statusOptions.length === 0){
+            state.statusOptions = DEFAULT_STATUS_OPTIONS.map(s=>Object.assign({},s));
+          }
+          if(state.people) state.people.forEach(p=>{ if(p.archived === undefined) p.archived = false; });
+          if(state.people) state.people.forEach(p=>{ if(!p.category) p.category = inferCategory(p.role); });
+          logActivity('Restored to last saved version');
+          render();
+        } else {
+          showAlert('No saved version found yet.');
+        }
+      }catch(e){
+        showAlert('Could not restore \u2014 something went wrong reading the last save.');
+      }
+    });
   }
 
   function clearSample(){
@@ -607,10 +687,34 @@
 
   function scheduleSave(){
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(async ()=>{
-      try{ await window.storage.set(STORAGE_KEY, JSON.stringify(state), false); }
-      catch(e){ console.error('save failed', e); }
-    }, 250);
+    saveTimer = setTimeout(()=> attemptSave(0), 250);
+  }
+
+  async function attemptSave(retryCount){
+    try{
+      await window.storage.set(STORAGE_KEY, JSON.stringify(state), false);
+    }catch(e){
+      console.error('save failed', e);
+      if(retryCount < 1){
+        setTimeout(()=> attemptSave(retryCount+1), 1500);
+      } else {
+        showSaveErrorToast();
+      }
+    }
+  }
+
+  function showSaveErrorToast(){
+    let toast = document.getElementById('rb-save-toast');
+    if(!toast){
+      toast = document.createElement('div');
+      toast.id = 'rb-save-toast';
+      toast.style.cssText = 'position:fixed;bottom:16px;right:16px;background:var(--over);color:#fff;padding:10px 14px;border-radius:8px;font-size:12.5px;font-weight:600;box-shadow:0 6px 20px rgba(0,0,0,.2);z-index:999;max-width:280px;line-height:1.4;';
+      document.body.appendChild(toast);
+    }
+    toast.textContent = 'Couldn\'t save your last change. Keep this tab open \u2014 your edits are still here. Try the change again in a moment.';
+    toast.style.display = 'block';
+    clearTimeout(toast._hideTimer);
+    toast._hideTimer = setTimeout(()=>{ toast.style.display = 'none'; }, 8000);
   }
 
   function applyTheme(theme){
@@ -930,11 +1034,72 @@
   }
 
   function renderOverview(){
+    renderNeedsAttention();
     renderParkingLot();
     renderOverviewUtilization();
     renderOverviewBench();
     renderOverviewPerPerson();
     renderOverviewKpi();
+  }
+
+  function renderNeedsAttention(){
+    const el = document.getElementById('rb-needs-attention');
+    if(!el) return;
+    const today = new Date();
+    const todayIso = isoDate(today);
+    const thisMon = mondayOf(today);
+    const items = [];
+
+    // 1. Over-capacity in the next 3 weeks (from today, regardless of Board navigation)
+    for(let i=0;i<3;i++){
+      const d = new Date(thisMon); d.setDate(d.getDate()+i*7);
+      const w = isoDate(d);
+      state.people.filter(p=>!p.archived).forEach(person=>{
+        const cap = effectiveCapacity(person, w);
+        const committed = committedHours(person.id, w);
+        if(cap > 0 && committed > cap){
+          const pct = Math.round((committed/cap)*100);
+          items.push({type:'over', sortDate:w, html:`<span style="color:var(--over);font-weight:700;">Over capacity</span> &mdash; ${escapeHtml(person.name)} is at ${pct}% the week of ${fmtShort(new Date(w))}`});
+        }
+      });
+    }
+
+    // 2. Unstaffed projects with a Kickoff or Go-Live milestone in the next 21 days
+    const cutoff = new Date(today); cutoff.setDate(cutoff.getDate()+21);
+    state.projects.forEach(proj=>{
+      if(isInternalStatus(proj) || projectHasAssignments(proj.id)) return;
+      const ms = proj.milestones || {};
+      ['kickoff','goLive'].forEach(key=>{
+        if(!ms[key]) return;
+        const d = new Date(ms[key]);
+        if(d >= today && d <= cutoff){
+          const label = key === 'kickoff' ? 'Kickoff' : 'Go-Live';
+          items.push({type:'unstaffed', sortDate:ms[key], html:`<span style="color:var(--over);font-weight:700;">Unstaffed</span> &mdash; "${escapeHtml(proj.name)}" has ${label} on ${fmtShort(d)} but no one assigned yet`});
+        }
+      });
+    });
+
+    // 3. Any milestone in the next 7 days
+    const weekOut = new Date(today); weekOut.setDate(weekOut.getDate()+7);
+    state.projects.forEach(proj=>{
+      const ms = proj.milestones || {};
+      MILESTONE_FIELDS.forEach(m=>{
+        if(!ms[m.key]) return;
+        const d = new Date(ms[m.key]);
+        if(d >= today && d <= weekOut){
+          items.push({type:'milestone', sortDate:ms[m.key], html:`<span style="color:var(--under);font-weight:700;">Milestone</span> &mdash; "${escapeHtml(proj.name)}" ${escapeHtml(m.label)} on ${fmtShort(d)}`});
+        }
+      });
+    });
+
+    if(items.length === 0){
+      el.innerHTML = '<div style="color:var(--ink-soft);font-size:12px;">Nothing needs attention right now.</div>';
+      return;
+    }
+    items.sort((a,b)=> a.sortDate.localeCompare(b.sortDate));
+    el.innerHTML = '<div class="rb-list-manage" style="max-height:none;">' + items.map(it=>`
+      <div class="row" style="cursor:default;"><span style="font-size:12.5px;">${it.html}</span></div>
+    `).join('') + '</div>';
   }
 
   function renderParkingLot(){
@@ -991,34 +1156,78 @@
     });
   }
 
+  let utilizationPeriodMode = 'weekly';
+
+  function monthLabelOf(d){ return d.toLocaleDateString(undefined,{month:'short', year:'numeric'}); }
+  function quarterLabelOf(d){ return 'Q'+(Math.floor(d.getMonth()/3)+1)+' '+d.getFullYear(); }
+  function periodKeyOf(d, mode){
+    return mode==='monthly' ? (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')) : (d.getFullYear()+'-Q'+(Math.floor(d.getMonth()/3)+1));
+  }
+
+  function buildUtilizationPeriods(mode){
+    if(mode === 'weekly'){
+      return getWeeks().map(w=>({label: fmtShort(new Date(w)), weeks:[w]}));
+    }
+    const start = mondayOf(new Date());
+    const totalWeeks = mode === 'monthly' ? 30 : 58;
+    const groups = {}; const order = [];
+    for(let i=0;i<totalWeeks;i++){
+      const d = new Date(start); d.setDate(d.getDate()+i*7);
+      const key = periodKeyOf(d, mode);
+      if(!groups[key]){ groups[key] = {label: mode==='monthly'?monthLabelOf(d):quarterLabelOf(d), weeks:[]}; order.push(key); }
+      groups[key].weeks.push(isoDate(d));
+    }
+    const periodCount = mode === 'monthly' ? 6 : 4;
+    return order.slice(0, periodCount).map(k=>groups[k]);
+  }
+
   function renderOverviewUtilization(){
     const container = document.getElementById('rb-overview-util-by-team');
     if(!container) return;
+    const sub = document.getElementById('rb-util-period-sub');
+    if(sub){
+      sub.textContent = utilizationPeriodMode === 'weekly'
+        ? 'Committed hours vs. total team capacity (after PTO), grouped by team. Use the \u2190 / \u2192 on the Board tab to change weeks.'
+        : utilizationPeriodMode === 'monthly'
+          ? 'Committed hours vs. total team capacity (after PTO), grouped by team, next 6 months from today.'
+          : 'Committed hours vs. total team capacity (after PTO), grouped by team, next 4 quarters from today.';
+    }
     const teams = getDistinctTeams();
-    if(teams.length === 0){
+    const pmPeople = pmCoordinatorPeople();
+    if(teams.length === 0 && pmPeople.length === 0){
       container.innerHTML = '<div style="color:var(--ink-soft);font-size:12px;">Add people to the board to see utilization.</div>';
       return;
     }
-    container.innerHTML = teams.map((t,i)=>`
-      <div style="font-size:12px;font-weight:700;margin:${i===0?10:16}px 0 6px;">${escapeHtml(t)}</div>
+    const periods = buildUtilizationPeriods(utilizationPeriodMode);
+    let html = '';
+    let idx = 0;
+    const sections = [];
+    if(pmPeople.length > 0){
+      sections.push({label:'PM / Coordinator', people:pmPeople});
+    }
+    teams.forEach(t=>{
+      const people = consultantPeopleInTeam(t);
+      if(people.length > 0) sections.push({label:t, people});
+    });
+    html = sections.map((s,i)=>`
+      <div style="font-size:12px;font-weight:700;margin:${i===0?10:16}px 0 6px;">${escapeHtml(s.label)}</div>
       <div style="overflow:auto;" id="rb-overview-util-wrap-${i}"></div>
     `).join('');
-    teams.forEach((t,i)=> renderOverviewUtilizationGroup(t, `rb-overview-util-wrap-${i}`, `rb-overview-util-table-${i}`));
+    container.innerHTML = html;
+    sections.forEach((s,i)=> renderOverviewUtilizationGroup(s.people, `rb-overview-util-wrap-${i}`, `rb-overview-util-table-${i}`, periods));
   }
 
-  function renderOverviewUtilizationGroup(team, wrapId, tableId){
+  function renderOverviewUtilizationGroup(people, wrapId, tableId, periods){
     const wrap = document.getElementById(wrapId);
     if(!wrap) return;
-    const people = peopleInTeam(team);
     if(people.length === 0){
-      wrap.innerHTML = '<div style="color:var(--ink-soft);font-size:12px;">No one on this team yet.</div>';
+      wrap.innerHTML = '<div style="color:var(--ink-soft);font-size:12px;">No one here yet.</div>';
       return;
     }
     wrap.innerHTML = `<table class="rb-overview-table" id="${tableId}"></table>`;
     const table = document.getElementById(tableId);
-    const weeks = getWeeks();
 
-    let thead = '<thead><tr><th>&nbsp;</th>' + weeks.map(w=>`<th>${fmtShort(new Date(w))}</th>`).join('') + '</tr></thead>';
+    let thead = '<thead><tr><th>&nbsp;</th>' + periods.map(p=>`<th>${escapeHtml(p.label)}</th>`).join('') + '</tr></thead>';
 
     let capRow = '<tr><th>Team capacity <span style="font-weight:400;color:var(--ink-soft);">(after PTO)</span></th>';
     let extRow = '<tr><th>Committed hours</th>';
@@ -1027,18 +1236,20 @@
     let ptoRow = '<tr><th>PTO hours</th>';
     let utilRow = '<tr><th>Utilization</th>';
 
-    weeks.forEach(w=>{
+    periods.forEach(period=>{
       let ext = 0, intl = 0, tent = 0, pto = 0, cap = 0;
-      people.forEach(person=>{
-        ext += committedHours(person.id, w);
-        cap += effectiveCapacity(person, w);
-        pto += getPtoHours(person.id, w);
-      });
-      state.assignments.filter(a=>a.weekStart===w && people.some(p=>p.id===a.personId)).forEach(a=>{
-        const proj = projectById(a.projectId);
-        if(!proj) return;
-        if(isInternalStatus(proj)) intl += Number(a.hours||0);
-        else if(a.tentative) tent += Number(a.hours||0);
+      period.weeks.forEach(w=>{
+        people.forEach(person=>{
+          ext += committedHours(person.id, w);
+          cap += effectiveCapacity(person, w);
+          pto += getPtoHours(person.id, w);
+        });
+        state.assignments.filter(a=>a.weekStart===w && people.some(p=>p.id===a.personId)).forEach(a=>{
+          const proj = projectById(a.projectId);
+          if(!proj) return;
+          if(isInternalStatus(proj)) intl += Number(a.hours||0);
+          else if(a.tentative) tent += Number(a.hours||0);
+        });
       });
       const pct = cap > 0 ? Math.round((ext/cap)*100) : 0;
       const status = utilStatus(pct);
@@ -1058,23 +1269,29 @@
     const container = document.getElementById('rb-overview-bench-by-team');
     if(!container) return;
     const teams = getDistinctTeams();
-    if(teams.length === 0){
+    const pmPeople = pmCoordinatorPeople();
+    if(teams.length === 0 && pmPeople.length === 0){
       container.innerHTML = '<div style="color:var(--ink-soft);font-size:12px;">Add people to the board to see open capacity.</div>';
       return;
     }
-    container.innerHTML = teams.map((t,i)=>`
-      <div style="font-size:12px;font-weight:700;margin:${i===0?10:16}px 0 6px;">${escapeHtml(t)}</div>
+    const sections = [];
+    if(pmPeople.length > 0) sections.push({label:'PM / Coordinator', people:pmPeople});
+    teams.forEach(t=>{
+      const people = consultantPeopleInTeam(t);
+      if(people.length > 0) sections.push({label:t, people});
+    });
+    container.innerHTML = sections.map((s,i)=>`
+      <div style="font-size:12px;font-weight:700;margin:${i===0?10:16}px 0 6px;">${escapeHtml(s.label)}</div>
       <div style="overflow:auto;" id="rb-overview-bench-wrap-${i}"></div>
     `).join('');
-    teams.forEach((t,i)=> renderOverviewBenchGroup(t, `rb-overview-bench-wrap-${i}`));
+    sections.forEach((s,i)=> renderOverviewBenchGroup(s.people, `rb-overview-bench-wrap-${i}`));
   }
 
-  function renderOverviewBenchGroup(team, wrapId){
+  function renderOverviewBenchGroup(people, wrapId){
     const wrap = document.getElementById(wrapId);
     if(!wrap) return;
-    const people = peopleInTeam(team);
     if(people.length === 0){
-      wrap.innerHTML = '<div style="color:var(--ink-soft);font-size:12px;">No one on this team yet.</div>';
+      wrap.innerHTML = '<div style="color:var(--ink-soft);font-size:12px;">No one here yet.</div>';
       return;
     }
     const week = getWeeks()[0];
@@ -1199,9 +1416,10 @@
           ${!projectHasAssignments(project.id) ? '<span class="rb-status-badge" style="background:var(--over-bg);color:var(--over);margin-left:0;">UNASSIGNED</span>':''}
           ${project.sample ? '<span class="rb-sample-tag">SAMPLE</span>':''}
         </div>
-        <div style="display:flex;gap:6px;">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <button class="rb-btn ghost sm" id="rb-pv-shift">Shift dates</button>
           <button class="rb-btn ghost sm" id="rb-pv-add-phase">+ Add phase</button>
+          <button class="rb-btn ghost sm" id="rb-pv-export">Export CSV</button>
           <button class="rb-btn ghost sm" id="rb-pv-edit">Edit project</button>
         </div>
       </div>
@@ -1263,6 +1481,10 @@
     document.getElementById('rb-pv-notes').addEventListener('click', ()=> openProjectNotesModal(project.id));
     document.getElementById('rb-pv-edit').addEventListener('click', ()=> openProjectEditModal(project, ()=> renderProjectViewDetail()));
     document.getElementById('rb-pv-add-phase').addEventListener('click', ()=> openAddPhaseModal(project));
+    document.getElementById('rb-pv-export').addEventListener('click', ()=>{
+      const safeName = project.name.replace(/[^a-z0-9]+/gi,'-').toLowerCase();
+      exportCsv({projectId: project.id, rollup:'weekly', filename: `${safeName}-export.csv`});
+    });
     document.getElementById('rb-pv-shift').addEventListener('click', ()=> openShiftProjectModal(project));
 
     const weeks = getProjectWeeks(project.id);
@@ -1328,6 +1550,37 @@
     document.getElementById('rb-confirm-ok').addEventListener('click', ()=>{ closeModal(); onConfirm(); });
   }
 
+  function showTypedConfirm(message, onConfirm){
+    const REQUIRED = 'I approve';
+    const host = document.getElementById('rb-modal-host');
+    host.innerHTML = `
+      <div class="rb-overlay" id="rb-overlay">
+        <div class="rb-modal" style="max-width:400px;">
+          <h3>Are you sure?</h3>
+          <div class="rb-modal-sub">${escapeHtml(message)}</div>
+          <div class="rb-field"><label>Type "${REQUIRED}" to continue</label><input id="rb-typed-confirm-input" placeholder="${REQUIRED}"/></div>
+          <div class="rb-modal-actions">
+            <button class="rb-btn ghost" id="rb-typed-confirm-cancel">Cancel</button>
+            <button class="rb-btn primary" id="rb-typed-confirm-ok" style="background:var(--over);border-color:var(--over);opacity:.5;" disabled>Confirm</button>
+          </div>
+        </div>
+      </div>`;
+    const input = document.getElementById('rb-typed-confirm-input');
+    const okBtn = document.getElementById('rb-typed-confirm-ok');
+    input.addEventListener('input', ()=>{
+      const match = input.value.trim() === REQUIRED;
+      okBtn.disabled = !match;
+      okBtn.style.opacity = match ? '1' : '.5';
+    });
+    document.getElementById('rb-typed-confirm-cancel').addEventListener('click', closeModal);
+    document.getElementById('rb-overlay').addEventListener('click', (e)=>{ if(e.target.id==='rb-overlay') closeModal(); });
+    okBtn.addEventListener('click', ()=>{
+      if(input.value.trim() !== REQUIRED) return;
+      closeModal();
+      onConfirm();
+    });
+  }
+
   function showAlert(message){
     const host = document.getElementById('rb-modal-host');
     host.innerHTML = `
@@ -1365,6 +1618,12 @@
             </div>
           </div>
           <div class="rb-field"><label>Weekly capacity (hrs)</label><input id="rb-p-cap" type="number" min="0" step="1" value="${editing ? editing.capacity : 40}"/></div>
+          <div class="rb-field"><label>Category <span style="font-weight:400;text-transform:none;">(drives grouping on the Utilization Rate tab)</span></label>
+            <select id="rb-p-category">
+              <option value="consultant" ${editing && (editing.category||inferCategory(editing.role))==='consultant' ? 'selected':''}>Consultant</option>
+              <option value="pm" ${editing && (editing.category||inferCategory(editing.role))==='pm' ? 'selected':''}>PM / Coordinator</option>
+            </select>
+          </div>
           <div class="rb-modal-actions">
             <button class="rb-btn ghost" id="rb-p-cancel">Cancel</button>
             <button class="rb-btn primary" id="rb-p-save">${editing ? 'Save' : 'Add'}</button>
@@ -1378,12 +1637,13 @@
       const team = document.getElementById('rb-p-team').value.trim() || DEFAULT_TEAM;
       const role = document.getElementById('rb-p-role').value.trim() || 'Team member';
       const cap = Number(document.getElementById('rb-p-cap').value) || 0;
+      const category = document.getElementById('rb-p-category').value;
       if(!name) return;
       if(editing){
-        editing.name = name; editing.role = role; editing.team = team; editing.capacity = cap;
+        editing.name = name; editing.role = role; editing.team = team; editing.capacity = cap; editing.category = category;
         logActivity(`Edited person "${name}"`);
       } else {
-        state.people.push({id:uid(), name, role, team, capacity:cap});
+        state.people.push({id:uid(), name, role, team, capacity:cap, category});
         logActivity(`Added person "${name}" (${role}, ${team})`);
       }
       scheduleSave(); closeModal(); render();
@@ -2430,19 +2690,57 @@
     });
   }
 
-  function exportCsv(){
-    const rows = [['Person','Role','Status','Project','Week','Hours','Tentative']];
-    state.assignments.forEach(a=>{
-      const person = personById(a.personId);
-      const proj = projectById(a.projectId);
-      if(!person || !proj) return;
-      rows.push([person.name, person.role, proj.status || '', proj.name, a.weekStart, a.hours, a.tentative ? 'Yes':'No']);
-    });
-    state.pto.forEach(p=>{
-      const person = personById(p.personId);
-      if(!person) return;
-      rows.push([person.name, person.role, 'PTO', 'Time off', p.weekStart, p.hours, 'No']);
-    });
+  function exportCsv(opts){
+    opts = opts || {};
+    const rollup = opts.rollup || 'weekly';
+    const startDate = opts.startDate || null;
+    const endDate = opts.endDate || null;
+    const projectFilter = opts.projectId || null;
+    const filename = opts.filename || 'resource-board-export.csv';
+
+    function inRange(dateStr){
+      if(startDate && dateStr < startDate) return false;
+      if(endDate && dateStr > endDate) return false;
+      return true;
+    }
+
+    let rows;
+    if(rollup === 'monthly'){
+      const map = {};
+      state.assignments.forEach(a=>{
+        if(projectFilter && a.projectId !== projectFilter) return;
+        if(!inRange(a.weekStart)) return;
+        const person = personById(a.personId), proj = projectById(a.projectId);
+        if(!person || !proj) return;
+        const d = new Date(a.weekStart);
+        const monthKey = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+        const key = a.personId+'|'+a.projectId+'|'+monthKey;
+        if(!map[key]) map[key] = {person, proj, monthKey, hours:0, tentHours:0};
+        map[key].hours += Number(a.hours||0);
+        if(a.tentative) map[key].tentHours += Number(a.hours||0);
+      });
+      rows = [['Person','Role','Status','Project','Month','Hours','Tentative Hours']];
+      Object.values(map).sort((x,y)=> x.monthKey.localeCompare(y.monthKey)).forEach(r=>{
+        rows.push([r.person.name, r.person.role, r.proj.status || '', r.proj.name, r.monthKey, r.hours, r.tentHours]);
+      });
+    } else {
+      rows = [['Person','Role','Status','Project','Week','Hours','Tentative']];
+      state.assignments.forEach(a=>{
+        if(projectFilter && a.projectId !== projectFilter) return;
+        if(!inRange(a.weekStart)) return;
+        const person = personById(a.personId), proj = projectById(a.projectId);
+        if(!person || !proj) return;
+        rows.push([person.name, person.role, proj.status || '', proj.name, a.weekStart, a.hours, a.tentative ? 'Yes':'No']);
+      });
+      if(!projectFilter){
+        state.pto.forEach(p=>{
+          if(!inRange(p.weekStart)) return;
+          const person = personById(p.personId);
+          if(!person) return;
+          rows.push([person.name, person.role, 'PTO', 'Time off', p.weekStart, p.hours, 'No']);
+        });
+      }
+    }
     const csv = rows.map(r=> r.map(v=>{
       const s = String(v);
       return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
@@ -2451,11 +2749,45 @@
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'resource-board-export.csv';
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  }
+
+  function openExportModal(){
+    const host = document.getElementById('rb-modal-host');
+    host.innerHTML = `
+      <div class="rb-overlay" id="rb-overlay">
+        <div class="rb-modal">
+          <h3>Export CSV</h3>
+          <div class="rb-modal-sub">Leave dates blank to export everything.</div>
+          <div class="rb-row2">
+            <div class="rb-field"><label>Start date <span style="font-weight:400;text-transform:none;">(optional)</span></label><input id="rb-export-start" type="date"/></div>
+            <div class="rb-field"><label>End date <span style="font-weight:400;text-transform:none;">(optional)</span></label><input id="rb-export-end" type="date"/></div>
+          </div>
+          <div class="rb-field"><label>Rollup</label>
+            <select id="rb-export-rollup">
+              <option value="weekly">Weekly (one row per week, includes PTO)</option>
+              <option value="monthly">Monthly (summed per person/project/month)</option>
+            </select>
+          </div>
+          <div class="rb-modal-actions">
+            <button class="rb-btn ghost" id="rb-export-cancel">Cancel</button>
+            <button class="rb-btn primary" id="rb-export-go">Export</button>
+          </div>
+        </div>
+      </div>`;
+    document.getElementById('rb-export-cancel').addEventListener('click', closeModal);
+    document.getElementById('rb-overlay').addEventListener('click', (e)=>{ if(e.target.id==='rb-overlay') closeModal(); });
+    document.getElementById('rb-export-go').addEventListener('click', ()=>{
+      const startDate = document.getElementById('rb-export-start').value || null;
+      const endDate = document.getElementById('rb-export-end').value || null;
+      const rollup = document.getElementById('rb-export-rollup').value;
+      exportCsv({startDate, endDate, rollup, filename:'resource-board-export.csv'});
+      closeModal();
+    });
   }
 
   // ---------- init ----------
@@ -2465,6 +2797,8 @@
   document.getElementById('rb-view-archived').addEventListener('click', ()=> openArchivedModal());
   document.getElementById('rb-manage-projects').addEventListener('click', ()=> openProjectsModal());
   document.getElementById('rb-manage-statuses').addEventListener('click', ()=> openStatusesModal());
+  document.getElementById('rb-reset-sample').addEventListener('click', ()=> resetToSampleData());
+  document.getElementById('rb-restore-last-save').addEventListener('click', ()=> restoreToLastSave());
   document.getElementById('rb-tab-board').addEventListener('click', ()=> switchTab('board'));
   document.getElementById('rb-tab-overview').addEventListener('click', ()=> switchTab('overview'));
   document.getElementById('rb-tab-project').addEventListener('click', ()=> switchTab('project'));
@@ -2475,7 +2809,7 @@
   });
   document.getElementById('rb-bulk-assign').addEventListener('click', ()=> openBulkAssignModal());
   document.getElementById('rb-new-phased-project').addEventListener('click', ()=> openPhasedProjectModal());
-  document.getElementById('rb-export-csv').addEventListener('click', ()=> exportCsv());
+  document.getElementById('rb-export-csv').addEventListener('click', ()=> openExportModal());
   document.getElementById('rb-manage-holidays').addEventListener('click', ()=> openHolidaysModal());
   document.getElementById('rb-theme-toggle').addEventListener('click', ()=> toggleTheme());
   document.getElementById('rb-filter').addEventListener('input', (e)=>{
@@ -2485,6 +2819,10 @@
   document.getElementById('rb-team-filter').addEventListener('change', (e)=>{
     teamFilter = e.target.value;
     renderGrid();
+  });
+  document.getElementById('rb-util-period').addEventListener('change', (e)=>{
+    utilizationPeriodMode = e.target.value;
+    renderOverviewUtilization();
   });
   document.getElementById('rb-kpi-year').addEventListener('change', (e)=>{
     kpiYear = Number(e.target.value) || new Date().getFullYear();
